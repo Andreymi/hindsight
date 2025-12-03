@@ -45,6 +45,7 @@ interface SearchPane {
   factTypes: FactType[];
   budget: Budget;
   maxTokens: number;
+  queryDate: string;
   includeChunks: boolean;
   includeEntities: boolean;
   results: any[] | null;
@@ -67,6 +68,7 @@ export function SearchDebugView() {
       factTypes: ['world'],
       budget: 'mid',
       maxTokens: 4096,
+      queryDate: '',
       includeChunks: false,
       includeEntities: false,
       results: null,
@@ -92,6 +94,7 @@ export function SearchDebugView() {
         factTypes: ['world'],
         budget: 'mid',
         maxTokens: 4096,
+        queryDate: '',
         includeChunks: false,
         includeEntities: false,
         results: null,
@@ -146,7 +149,8 @@ export function SearchDebugView() {
         include: {
           entities: pane.includeEntities ? { max_tokens: 500 } : null,
           chunks: pane.includeChunks ? { max_tokens: 8192 } : null
-        }
+        },
+        ...(pane.queryDate && { query_timestamp: pane.queryDate })
       };
 
       const data: any = await client.recall(requestBody);
