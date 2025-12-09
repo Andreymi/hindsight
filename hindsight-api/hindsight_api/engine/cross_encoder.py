@@ -79,10 +79,10 @@ class SentenceTransformersCrossEncoder(CrossEncoderModel):
 
         logger.info(f"Loading cross-encoder model: {self.model_name}...")
         # Disable lazy loading (meta tensors) which causes issues with newer transformers/accelerate
-        # Setting low_cpu_mem_usage=False ensures tensors are fully materialized on load
+        # Setting low_cpu_mem_usage=False and device_map=None ensures tensors are fully materialized
         self._model = CrossEncoder(
             self.model_name,
-            automodel_args={"low_cpu_mem_usage": False},
+            model_kwargs={"low_cpu_mem_usage": False, "device_map": None},
         )
         logger.info("Cross-encoder model loaded")
 
