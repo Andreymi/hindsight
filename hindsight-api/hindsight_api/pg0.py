@@ -174,8 +174,15 @@ class EmbeddedPostgres:
         download_url = get_download_url(self.version)
         logger.info(f"Downloading from {download_url}")
 
+        # Use GitHub token if available to avoid rate limits
+        headers = {}
+        github_token = os.environ.get("GITHUB_TOKEN")
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+            logger.debug("Using GITHUB_TOKEN for download")
+
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=300.0) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=300.0, headers=headers) as client:
                 response = await client.get(download_url)
                 response.raise_for_status()
 

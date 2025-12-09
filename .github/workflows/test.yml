@@ -107,6 +107,7 @@ jobs:
       HINDSIGHT_API_LLM_PROVIDER: groq
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -140,6 +141,7 @@ jobs:
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
       HINDSIGHT_API_URL: http://localhost:8888
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -195,6 +197,7 @@ jobs:
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
       HINDSIGHT_API_URL: http://localhost:8888
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -255,6 +258,7 @@ jobs:
       HINDSIGHT_API_LLM_API_KEY: ${{ secrets.GROQ_API_KEY }}
       HINDSIGHT_API_LLM_MODEL: openai/gpt-oss-20b
       HINDSIGHT_API_URL: http://localhost:8888
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
