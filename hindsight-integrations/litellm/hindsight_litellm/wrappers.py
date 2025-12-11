@@ -113,7 +113,7 @@ def recall(
     target_bank_id = bank_id or (config.bank_id if config else None)
     target_fact_types = fact_types or (config.fact_types if config else None)
     target_budget = budget or (config.recall_budget if config else "mid")
-    target_max_tokens = max_tokens or (config.max_memory_tokens if config else 2000)
+    target_max_tokens = max_tokens or (config.max_memory_tokens if config else 4096)
 
     if not api_url or not target_bank_id:
         raise RuntimeError(
@@ -561,7 +561,7 @@ class HindsightOpenAI:
                 bank_id=self._bank_id,
                 query=query,
                 budget=self._recall_budget,
-                max_tokens=self._max_memories * 200 if self._max_memories else 2000,
+                max_tokens=self._max_memories * 200 if self._max_memories else 4096,
             )
 
             if not results:
@@ -765,7 +765,7 @@ class HindsightAnthropic:
                 bank_id=self._bank_id,
                 query=query,
                 budget=self._recall_budget,
-                max_tokens=self._max_memories * 200 if self._max_memories else 2000,
+                max_tokens=self._max_memories * 200 if self._max_memories else 4096,
             )
 
             if not results:

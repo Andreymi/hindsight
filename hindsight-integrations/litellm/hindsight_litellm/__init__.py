@@ -10,7 +10,7 @@ Features:
 - Works with any LiteLLM-supported provider
 - Zero code changes to existing LiteLLM usage
 - Multi-user support via separate bank_ids
-- Session management for conversation threading
+- Document grouping for conversation threading
 - Direct recall API for manual memory queries
 - Native client wrappers for OpenAI and Anthropic
 
@@ -56,13 +56,6 @@ Native client wrappers:
     ...     messages=[{"role": "user", "content": "Hello!"}]
     ... )
 
-Session management:
-    >>> from hindsight_litellm import configure, new_session, set_session
-    >>> configure(bank_id="my-agent")
-    >>>
-    >>> session_id = new_session()  # Start fresh conversation
-    >>> set_session("previous-id")  # Resume previous conversation
-
 Works with any LiteLLM-supported provider:
     >>> # OpenAI
     >>> litellm.completion(model="gpt-4", messages=[...])
@@ -94,7 +87,6 @@ Configuration options:
     - bank_id: Memory bank ID for memory operations (required). For multi-user
         support, use different bank_ids per user (e.g., f"user-{user_id}")
     - api_key: Optional API key for Hindsight authentication
-    - session_id: Session identifier for conversation grouping
     - store_conversations: Whether to store conversations (default: True)
     - inject_memories: Whether to inject relevant memories (default: True)
     - injection_mode: How to inject memories (system_message or prepend_user)
@@ -124,9 +116,6 @@ from .config import (
     get_config,
     is_configured,
     reset_config,
-    new_session,
-    set_session,
-    get_session,
     HindsightConfig,
     MemoryInjectionMode,
 )
@@ -343,7 +332,7 @@ def _inject_memories(messages: List[dict]) -> List[dict]:
                 bank_id=bank_id,
                 query=user_query,
                 budget=config.recall_budget or "mid",
-                max_tokens=config.max_memory_tokens or 2000,
+                max_tokens=config.max_memory_tokens or 4096,
                 types=config.fact_types,
             )
             # client.recall() returns a list directly, not an object with .results
@@ -689,12 +678,11 @@ def hindsight_memory(
     hindsight_api_url: str = "http://localhost:8888",
     bank_id: Optional[str] = None,
     api_key: Optional[str] = None,
-    session_id: Optional[str] = None,
     store_conversations: bool = True,
     inject_memories: bool = True,
     injection_mode: MemoryInjectionMode = MemoryInjectionMode.SYSTEM_MESSAGE,
     max_memories: Optional[int] = None,
-    max_memory_tokens: int = 2000,
+    max_memory_tokens: int = 4096,
     recall_budget: str = "mid",
     fact_types: Optional[List[str]] = None,
     document_id: Optional[str] = None,
@@ -713,7 +701,6 @@ def hindsight_memory(
         bank_id: Memory bank ID for memory operations (required). For multi-user
             support, use different bank_ids per user (e.g., f"user-{user_id}")
         api_key: Optional API key for Hindsight authentication
-        session_id: Session identifier for conversation grouping
         store_conversations: Whether to store conversations
         inject_memories: Whether to inject relevant memories
         injection_mode: How to inject memories
@@ -745,7 +732,6 @@ def hindsight_memory(
             hindsight_api_url=hindsight_api_url,
             bank_id=bank_id,
             api_key=api_key,
-            session_id=session_id,
             store_conversations=store_conversations,
             inject_memories=inject_memories,
             injection_mode=injection_mode,
@@ -769,7 +755,6 @@ def hindsight_memory(
                 hindsight_api_url=previous_config.hindsight_api_url,
                 bank_id=previous_config.bank_id,
                 api_key=previous_config.api_key,
-                session_id=previous_config.session_id,
                 store_conversations=previous_config.store_conversations,
                 inject_memories=previous_config.inject_memories,
                 injection_mode=previous_config.injection_mode,
@@ -800,10 +785,6 @@ __all__ = [
     # LLM completion wrappers (convenience)
     "completion",
     "acompletion",
-    # Session management
-    "new_session",
-    "set_session",
-    "get_session",
     # Direct memory APIs
     "recall",
     "arecall",

@@ -3,7 +3,6 @@
 from typing import Optional, List
 from dataclasses import dataclass, field
 from enum import Enum
-from uuid import uuid4
 
 
 class MemoryInjectionMode(str, Enum):
@@ -22,7 +21,6 @@ class HindsightConfig:
         bank_id: Memory bank ID for memory operations (required). For multi-user
             support, use different bank_ids per user (e.g., f"user-{user_id}")
         api_key: Optional API key for Hindsight authentication
-        session_id: Session identifier for conversation grouping
         store_conversations: Whether to store conversations to Hindsight
         inject_memories: Whether to inject relevant memories into prompts
         injection_mode: How to inject memories (system_message or prepend_user)
@@ -42,12 +40,11 @@ class HindsightConfig:
     hindsight_api_url: str = "http://localhost:8888"
     bank_id: Optional[str] = None
     api_key: Optional[str] = None
-    session_id: Optional[str] = None  # Session identifier for conversation grouping
     store_conversations: bool = True
     inject_memories: bool = True
     injection_mode: MemoryInjectionMode = MemoryInjectionMode.SYSTEM_MESSAGE
     max_memories: Optional[int] = None  # None = no limit (use all results from API)
-    max_memory_tokens: int = 2000
+    max_memory_tokens: int = 4096
     recall_budget: str = "mid"  # low, mid, high
     fact_types: Optional[List[str]] = None  # world, agent, opinion, observation
     document_id: Optional[str] = None
@@ -68,12 +65,11 @@ def configure(
     hindsight_api_url: str = "http://localhost:8888",
     bank_id: Optional[str] = None,
     api_key: Optional[str] = None,
-    session_id: Optional[str] = None,
     store_conversations: bool = True,
     inject_memories: bool = True,
     injection_mode: MemoryInjectionMode = MemoryInjectionMode.SYSTEM_MESSAGE,
     max_memories: Optional[int] = None,
-    max_memory_tokens: int = 2000,
+    max_memory_tokens: int = 4096,
     recall_budget: str = "mid",
     fact_types: Optional[List[str]] = None,
     document_id: Optional[str] = None,
@@ -95,7 +91,6 @@ def configure(
         bank_id: Memory bank ID for memory operations (required). For multi-user
             support, use different bank_ids per user (e.g., f"user-{user_id}")
         api_key: Optional API key for Hindsight authentication
-        session_id: Session identifier for conversation grouping
         store_conversations: Whether to store conversations to Hindsight
         inject_memories: Whether to inject relevant memories into prompts
         injection_mode: How to inject memories into the prompt
@@ -139,7 +134,6 @@ def configure(
         hindsight_api_url=hindsight_api_url,
         bank_id=bank_id,
         api_key=api_key,
-        session_id=session_id,
         store_conversations=store_conversations,
         inject_memories=inject_memories,
         injection_mode=injection_mode,
@@ -236,72 +230,3 @@ def reset_config() -> None:
     """Reset the global configuration to None."""
     global _global_config
     _global_config = None
-
-
-def new_session() -> str:
-    """Generate and set a new session ID.
-
-    Creates a new UUID-based session ID and updates the global config.
-    This is useful for starting fresh conversation threads.
-
-    Returns:
-        The new session ID string
-
-    Raises:
-        RuntimeError: If Hindsight has not been configured
-
-    Example:
-        >>> from hindsight_litellm import configure, new_session
-        >>> configure(bank_id="my-agent")
-        >>> session_id = new_session()
-        >>> print(f"Started new session: {session_id}")
-    """
-    global _global_config
-
-    if _global_config is None:
-        raise RuntimeError(
-            "Hindsight not configured. Call configure() before new_session()."
-        )
-
-    new_id = str(uuid4())
-    _global_config.session_id = new_id
-    return new_id
-
-
-def set_session(session_id: str) -> None:
-    """Set a specific session ID.
-
-    Use this to resume a previous conversation session.
-
-    Args:
-        session_id: The session ID to set
-
-    Raises:
-        RuntimeError: If Hindsight has not been configured
-
-    Example:
-        >>> from hindsight_litellm import configure, set_session
-        >>> configure(bank_id="my-agent")
-        >>> set_session("previous-session-id")  # Resume conversation
-    """
-    global _global_config
-
-    if _global_config is None:
-        raise RuntimeError(
-            "Hindsight not configured. Call configure() before set_session()."
-        )
-
-    _global_config.session_id = session_id
-
-
-def get_session() -> Optional[str]:
-    """Get the current session ID.
-
-    Returns:
-        The current session ID, or None if not set
-    """
-    if _global_config is None:
-        return None
-    return _global_config.session_id
-
-

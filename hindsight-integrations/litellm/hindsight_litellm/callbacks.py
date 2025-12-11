@@ -265,7 +265,7 @@ class HindsightCallback(CustomLogger):
             request_data = {
                 "query": query,
                 "budget": config.recall_budget or "mid",
-                "max_tokens": config.max_memory_tokens or 2000,
+                "max_tokens": config.max_memory_tokens or 4096,
             }
             if config.fact_types:
                 request_data["types"] = config.fact_types
@@ -315,8 +315,7 @@ class HindsightCallback(CustomLogger):
         """Store the conversation to Hindsight (sync) using direct HTTP.
 
         By default, stores the full conversation history passed to the LLM.
-        Each message is stored as a separate item, all linked by document_id
-        (using session_id if set, otherwise a generated one).
+        Each message is stored as a separate item, all linked by document_id.
 
         Hindsight will process the document as a whole for memory extraction.
         """
@@ -375,9 +374,6 @@ class HindsightCallback(CustomLogger):
                     logger.debug(f"Skipping duplicate conversation: {conv_hash}")
                 return
 
-            # Use session_id as document_id if set, otherwise use config.document_id
-            doc_id = config.document_id or config.session_id
-
             # Build the full conversation as a single item for now
             # (Future: could store each message as separate item in same document)
             conversation_text = "\n\n".join(items)
@@ -393,10 +389,6 @@ class HindsightCallback(CustomLogger):
                 if hasattr(response.usage, "total_tokens"):
                     metadata["tokens"] = str(response.usage.total_tokens)
 
-            # Add session_id to metadata if set
-            if config.session_id:
-                metadata["session_id"] = config.session_id
-
             bank_id = self._get_bank_id(config)
             url = f"{config.hindsight_api_url}/v1/default/banks/{bank_id}/memories"
 
@@ -406,7 +398,7 @@ class HindsightCallback(CustomLogger):
                         "content": conversation_text,
                         "context": f"conversation:litellm:{model}",
                         "metadata": metadata,
-                        "document_id": doc_id,  # Group by session/document
+                        "document_id": config.document_id,  # Group by document
                     }
                 ],
             }
