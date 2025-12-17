@@ -26,29 +26,25 @@ client.retain(bank_id="my-bank", content="C++ has a larger ecosystem and more li
 # =============================================================================
 
 # [docs:opinion-form]
-# Ask a question that might form an opinion
+# Ask a question - the system may form opinions based on stored facts
 answer = client.reflect(
     bank_id="my-bank",
     query="What do you think about functional programming?"
 )
 
-# Check if new opinions were formed
-for opinion in answer.get("new_opinions", []):
-    print(f"New opinion: {opinion['text']}")
-    print(f"Confidence: {opinion['confidence']}")
+print(answer.text)
 # [/docs:opinion-form]
 
 
 # [docs:opinion-search]
-# Search only opinions
-opinions = client.recall(
+# Search for facts about a topic
+results = client.recall(
     bank_id="my-bank",
-    query="programming languages",
-    types=["opinion"]
+    query="programming languages"
 )
 
-for op in opinions:
-    print(f"{op['text']} (confidence: {op['confidence_score']:.2f})")
+for result in results.results:
+    print(f"- {result.text}")
 # [/docs:opinion-search]
 
 
@@ -74,27 +70,27 @@ for fact in facts:
     client.retain(bank_id="open-minded", content=fact)
     client.retain(bank_id="conservative", content=fact)
 
-# Ask both the same question
+# Ask both the same question - different dispositions lead to different responses
 q = "Should we rewrite our C++ codebase in Rust?"
 
 answer1 = client.reflect(bank_id="open-minded", query=q)
-# Likely: "Yes, Rust's safety benefits outweigh migration costs"
+print("Open-minded response:", answer1.text[:100], "...")
 
 answer2 = client.reflect(bank_id="conservative", query=q)
-# Likely: "No, C++'s ecosystem and our team's expertise make it the safer choice"
+print("Conservative response:", answer2.text[:100], "...")
 # [/docs:opinion-disposition]
 
 
 # [docs:opinion-in-reflect]
 answer = client.reflect(bank_id="my-bank", query="What language should I learn?")
 
-print("World facts used:")
-for f in answer.based_on.get("world", []):
-    print(f"  {f['text']}")
+print("Response:", answer.text)
 
-print("\nOpinions used:")
-for o in answer.based_on.get("opinion", []):
-    print(f"  {o['text']} (confidence: {o['confidence_score']})")
+# See which facts influenced the response
+if answer.based_on:
+    print("\nBased on these facts:")
+    for fact in answer.based_on:
+        print(f"  - {fact.text}")
 # [/docs:opinion-in-reflect]
 
 
