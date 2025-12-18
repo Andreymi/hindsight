@@ -99,13 +99,13 @@ jobs:
     - name: Build SDK
       run: npm run build --workspace=hindsight-clients/typescript
 
-    # Install control plane deps WITHOUT lockfile (same as Docker build)
-    # This ensures npm resolves correct platform-specific binaries for lightningcss
+    # Install control plane deps and fix hoisted lightningcss binary
+    # lightningcss gets hoisted to root node_modules, so we need to reinstall it there
     - name: Install Control Plane dependencies
-      working-directory: ./hindsight-control-plane
       run: |
-        rm -f package-lock.json
-        npm install
+        npm install --workspace=hindsight-control-plane
+        rm -rf node_modules/lightningcss node_modules/@tailwindcss
+        npm install lightningcss @tailwindcss/postcss @tailwindcss/node
 
     - name: Build Control Plane
       run: npm run build --workspace=hindsight-control-plane
