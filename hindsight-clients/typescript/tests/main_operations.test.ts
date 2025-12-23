@@ -255,7 +255,7 @@ describe('TestOperations', () => {
 
         // First create an async operation
         await client.retain(bankId, 'Test content for async operation', {
-            retainAsync: true,
+            async: true,
         });
 
         const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
@@ -278,7 +278,7 @@ describe('TestDocuments', () => {
 
         // First create a document
         await client.retain(bankId, 'Test document content for deletion', {
-            document_id: docId,
+            documentId: docId,
         });
 
         const apiClient = createClient(createConfig({ baseUrl: HINDSIGHT_API_URL }));
