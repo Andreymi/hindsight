@@ -38,8 +38,13 @@ export function DocumentsView() {
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
 
   // Delete confirmation dialog state
-  const [documentToDelete, setDocumentToDelete] = useState<{ id: string; memoryCount?: number } | null>(null);
-  const [deleteResult, setDeleteResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [documentToDelete, setDocumentToDelete] = useState<{
+    id: string;
+    memoryCount?: number;
+  } | null>(null);
+  const [deleteResult, setDeleteResult] = useState<{ success: boolean; message: string } | null>(
+    null
+  );
 
   const loadDocuments = async () => {
     if (!currentBank) return;
@@ -318,7 +323,12 @@ export function DocumentsView() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => requestDeleteDocument(selectedDocument.id, selectedDocument.memory_unit_count)}
+                        onClick={() =>
+                          requestDeleteDocument(
+                            selectedDocument.id,
+                            selectedDocument.memory_unit_count
+                          )
+                        }
                         className="w-full gap-2"
                         disabled={deletingDocumentId === selectedDocument.id}
                       >
@@ -353,19 +363,27 @@ export function DocumentsView() {
       )}
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)}>
+      <AlertDialog
+        open={!!documentToDelete}
+        onOpenChange={(open) => !open && setDocumentToDelete(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Document</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete document <span className="font-mono font-semibold">&quot;{documentToDelete?.id}&quot;</span>?
-              <br /><br />
-              This will also delete {documentToDelete?.memoryCount !== undefined ? (
+              Are you sure you want to delete document{" "}
+              <span className="font-mono font-semibold">&quot;{documentToDelete?.id}&quot;</span>?
+              <br />
+              <br />
+              This will also delete{" "}
+              {documentToDelete?.memoryCount !== undefined ? (
                 <span className="font-semibold">{documentToDelete.memoryCount} memory units</span>
               ) : (
                 "all memory units"
-              )} extracted from this document.
-              <br /><br />
+              )}{" "}
+              extracted from this document.
+              <br />
+              <br />
               <span className="text-destructive font-semibold">This action cannot be undone.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -388,14 +406,10 @@ export function DocumentsView() {
             <AlertDialogTitle>
               {deleteResult?.success ? "Document Deleted" : "Error"}
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteResult?.message}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{deleteResult?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setDeleteResult(null)}>
-              OK
-            </AlertDialogAction>
+            <AlertDialogAction onClick={() => setDeleteResult(null)}>OK</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
