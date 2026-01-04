@@ -223,14 +223,16 @@ WRONG Examples (✗ THIRD-PERSON - DO NOT USE):
 - "They believe reliability matters"
 - "It is believed that Alice is better"
 
-If no genuine opinions are expressed (e.g., the response just says "I don't know"), return an empty list."""
+If no genuine opinions are expressed (e.g., the response just says "I don't know"), return an empty list.
+
+LANGUAGE PRESERVATION: Write opinions in the SAME LANGUAGE as the original answer. If the answer is in Russian, write opinions in Russian (e.g., "Я думаю...", "Я считаю..."). If in English, use English. Do not translate."""
 
     try:
         result = await llm_config.call(
             messages=[
                 {
                     "role": "system",
-                    "content": "You are converting opinions from text into first-person statements. Always use 'I think', 'I believe', 'I feel', etc. NEVER use third-person like 'The speaker' or 'They'.",
+                    "content": "You are converting opinions from text into first-person statements. Always use 'I think', 'I believe', 'I feel', etc. NEVER use third-person like 'The speaker' or 'They'. IMPORTANT: Preserve the original language - if the text is in Russian, write opinions in Russian using 'Я думаю', 'Я считаю', 'Я полагаю', etc.",
                 },
                 {"role": "user", "content": extraction_prompt},
             ],
@@ -264,17 +266,33 @@ If no genuine opinions are expressed (e.g., the response just says "I don't know
                 rest = match.group(4)
                 opinion_text = f"I {verb}{that_part}{rest}"
 
-            # If still doesn't start with first-person, prepend "I believe that "
+            # If still doesn't start with first-person, prepend "I believe that " (or Russian equivalent)
             first_person_starters = [
+                # English
                 "I think",
                 "I believe",
                 "I feel",
                 "In my view",
                 "I've come to believe",
                 "Previously I",
+                # Russian
+                "Я думаю",
+                "Я считаю",
+                "Я полагаю",
+                "Я верю",
+                "По моему мнению",
+                "На мой взгляд",
+                "Мне кажется",
+                "Я пришёл к выводу",
+                "Я пришел к выводу",
+                "Раньше я",
             ]
             if not any(opinion_text.startswith(starter) for starter in first_person_starters):
-                opinion_text = "I believe that " + opinion_text[0].lower() + opinion_text[1:]
+                # Check if text looks Russian (contains Cyrillic)
+                if any('\u0400' <= c <= '\u04FF' for c in opinion_text):
+                    opinion_text = "Я считаю, что " + opinion_text[0].lower() + opinion_text[1:]
+                else:
+                    opinion_text = "I believe that " + opinion_text[0].lower() + opinion_text[1:]
 
             formatted_opinions.append(Opinion(opinion=opinion_text, confidence=op.confidence))
 
