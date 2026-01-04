@@ -81,12 +81,20 @@ EXAMPLES of bad observations (avoid these):
 - "John probably likes his job" (assumption)
 - "I believe John is reliable" (first-person opinion)
 
+LANGUAGE PRESERVATION (CRITICAL):
+- Write observations in the SAME LANGUAGE as the input facts
+- If facts are in Russian, write observations in Russian
+- If facts are in English, write observations in English
+- Do NOT translate - preserve the original language
+
 Generate 3-7 observations based on the available facts. If there are very few facts, generate fewer observations."""
 
 
 def get_observation_system_message() -> str:
     """Get the system message for observation extraction."""
-    return "You are an objective observer synthesizing facts about an entity. Generate clear, factual observations without opinions or personality influence. Be concise and accurate."
+    return """You are an objective observer synthesizing facts about an entity. Generate clear, factual observations without opinions or personality influence. Be concise and accurate.
+
+LANGUAGE: Write observations in the SAME LANGUAGE as the input facts. If facts are in Russian, write observations in Russian. If in English, use English. Do not translate."""
 
 
 async def extract_observations_from_facts(llm_config, entity_name: str, facts: list[MemoryFact]) -> list[str]:
