@@ -131,11 +131,11 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
                 request_context=RequestContext(),
             )
 
-            # Use model's JSON serialization
-            return recall_result.model_dump_json(indent=2)
+            # Use JSON with ensure_ascii=False for proper non-ASCII display
+            return json.dumps(recall_result.model_dump(), indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error searching: {e}", exc_info=True)
-            return f'{{"error": "{e}", "results": []}}'
+            return json.dumps({"error": str(e), "results": []}, ensure_ascii=False)
 
     @mcp.tool()
     async def reflect(query: str, context: str | None = None, budget: str = "low", bank_id: str | None = None) -> str:
@@ -182,10 +182,10 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
                 request_context=RequestContext(),
             )
 
-            return reflect_result.model_dump_json(indent=2)
+            return json.dumps(reflect_result.model_dump(), indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error reflecting: {e}", exc_info=True)
-            return f'{{"error": "{e}", "text": ""}}'
+            return json.dumps({"error": str(e), "text": ""}, ensure_ascii=False)
 
     @mcp.tool()
     async def list_banks() -> str:
