@@ -573,6 +573,8 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._handle_batch_retain(task_dict)
             elif task_type == "regenerate_observations":
                 await self._handle_regenerate_observations(task_dict)
+            elif task_type == "cleanup_orphaned_data":
+                await self._handle_cleanup_orphaned_data(task_dict)
             else:
                 logger.error(f"Unknown task type: {task_type}")
                 # Don't retry unknown task types
@@ -2338,6 +2340,9 @@ class MemoryEngine(MemoryEngineInterface):
         """
         Delete a document and all its associated memory units and links.
 
+        Also schedules cleanup of orphaned entities and observations that may
+        result from the deletion.
+
         Args:
             document_id: Document ID to delete
             bank_id: bank ID that owns the document
@@ -2350,6 +2355,18 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
+                # Collect affected entity IDs BEFORE deletion
+                affected_entities = await conn.fetch(
+                    f"""
+                    SELECT DISTINCT ue.entity_id
+                    FROM {fq_table('unit_entities')} ue
+                    JOIN {fq_table('memory_units')} mu ON ue.unit_id = mu.id
+                    WHERE mu.document_id = $1
+                    """,
+                    document_id,
+                )
+                affected_entity_ids = [str(row["entity_id"]) for row in affected_entities]
+
                 # Count units before deletion
                 units_count = await conn.fetchval(
                     f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE document_id = $1", document_id
@@ -2362,7 +2379,15 @@ class MemoryEngine(MemoryEngineInterface):
                     bank_id,
                 )
 
-                return {"document_deleted": 1 if deleted else 0, "memory_units_deleted": units_count if deleted else 0}
+        # Schedule async cleanup for affected entities (outside transaction)
+        if deleted and affected_entity_ids:
+            await self._task_backend.submit_task({
+                "type": "cleanup_orphaned_data",
+                "bank_id": bank_id,
+                "entity_ids": affected_entity_ids,
+            })
+
+        return {"document_deleted": 1 if deleted else 0, "memory_units_deleted": units_count if deleted else 0}
 
     async def delete_memory_unit(
         self,
@@ -4300,6 +4325,113 @@ Guidelines:
             await self.regenerate_entity_observations(
                 bank_id, entity_id, entity_name, version=version, request_context=internal_context
             )
+
+    async def _handle_cleanup_orphaned_data(self, task_dict: dict[str, Any]):
+        """
+        Handler for cleanup_orphaned_data tasks.
+
+        Cleans up entities and observations that may have become orphaned
+        after document deletion. For each affected entity:
+        - If entity has 0 remaining facts: delete entity and its observations
+        - If entity has facts < threshold: delete only observations
+        - If entity has facts >= threshold: keep everything
+
+        Args:
+            task_dict: Dict with:
+                - 'bank_id': Bank identifier
+                - 'entity_ids': List of entity IDs to check
+
+        This task is submitted by delete_document() after CASCADE deletion
+        removes facts but leaves entities and observations.
+        """
+        bank_id = task_dict.get("bank_id")
+        entity_ids = task_dict.get("entity_ids", [])
+
+        if not bank_id or not entity_ids:
+            logger.warning(f"[CLEANUP] Missing required fields in task: {task_dict}")
+            return
+
+        config = get_config()
+        min_facts_threshold = config.observation_min_facts
+
+        pool = await self._get_pool()
+        async with acquire_with_retry(pool) as conn:
+            deleted_entities = 0
+            deleted_observations = 0
+
+            for entity_id in entity_ids:
+                try:
+                    import uuid as uuid_module
+
+                    entity_uuid = uuid_module.UUID(entity_id) if isinstance(entity_id, str) else entity_id
+
+                    # Count remaining facts for this entity (world + experience only)
+                    fact_count = await conn.fetchval(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM {fq_table('unit_entities')} ue
+                        JOIN {fq_table('memory_units')} mu ON ue.unit_id = mu.id
+                        WHERE ue.entity_id = $1
+                          AND mu.fact_type IN ('world', 'experience')
+                        """,
+                        entity_uuid,
+                    ) or 0
+
+                    if fact_count == 0:
+                        # No facts remain - delete entity and its observations
+                        # First delete observations (memory_units with fact_type='observation')
+                        obs_deleted = await conn.execute(
+                            f"""
+                            DELETE FROM {fq_table('memory_units')}
+                            WHERE id IN (
+                                SELECT mu.id
+                                FROM {fq_table('memory_units')} mu
+                                JOIN {fq_table('unit_entities')} ue ON mu.id = ue.unit_id
+                                WHERE ue.entity_id = $1
+                                  AND mu.fact_type = 'observation'
+                            )
+                            """,
+                            entity_uuid,
+                        )
+                        obs_count = int(obs_deleted.split()[-1]) if obs_deleted else 0
+                        deleted_observations += obs_count
+
+                        # Then delete the entity itself
+                        await conn.execute(
+                            f"DELETE FROM {fq_table('entities')} WHERE id = $1",
+                            entity_uuid,
+                        )
+                        deleted_entities += 1
+
+                    elif fact_count < min_facts_threshold:
+                        # Below threshold - delete only observations (not enough evidence)
+                        obs_deleted = await conn.execute(
+                            f"""
+                            DELETE FROM {fq_table('memory_units')}
+                            WHERE id IN (
+                                SELECT mu.id
+                                FROM {fq_table('memory_units')} mu
+                                JOIN {fq_table('unit_entities')} ue ON mu.id = ue.unit_id
+                                WHERE ue.entity_id = $1
+                                  AND mu.fact_type = 'observation'
+                            )
+                            """,
+                            entity_uuid,
+                        )
+                        obs_count = int(obs_deleted.split()[-1]) if obs_deleted else 0
+                        deleted_observations += obs_count
+
+                    # else: fact_count >= threshold - keep entity and observations
+
+                except Exception as e:
+                    logger.error(f"[CLEANUP] Error processing entity {entity_id}: {e}")
+                    continue
+
+            if deleted_entities > 0 or deleted_observations > 0:
+                logger.info(
+                    f"[CLEANUP] bank={bank_id}: deleted {deleted_entities} orphaned entities, "
+                    f"{deleted_observations} orphaned observations"
+                )
 
     # =========================================================================
     # Statistics & Operations (for HTTP API layer)
