@@ -69,6 +69,8 @@ def _start_daemon(config: dict) -> bool:
         env["HINDSIGHT_API_LLM_PROVIDER"] = config["llm_provider"]
     if config.get("llm_model"):
         env["HINDSIGHT_API_LLM_MODEL"] = config["llm_model"]
+    if config.get("llm_base_url"):
+        env["HINDSIGHT_API_LLM_BASE_URL"] = config["llm_base_url"]
 
     # Use pg0 database specific to bank
     bank_id = config.get("bank_id", "default")

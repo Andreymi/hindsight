@@ -79,6 +79,8 @@ def get_config():
         or os.environ.get("HINDSIGHT_API_LLM_PROVIDER", "openai"),
         "llm_model": os.environ.get("HINDSIGHT_EMBED_LLM_MODEL")
         or os.environ.get("HINDSIGHT_API_LLM_MODEL", "gpt-4o-mini"),
+        "llm_base_url": os.environ.get("HINDSIGHT_EMBED_LLM_BASE_URL")
+        or os.environ.get("HINDSIGHT_API_LLM_BASE_URL"),
         "bank_id": os.environ.get("HINDSIGHT_EMBED_BANK_ID", "default"),
     }
 
