@@ -465,12 +465,45 @@ async def analyze_import(
     return stats
 
 
+def show_profile_diff(source_disp: dict, target_disp: dict, source_bg: str, target_bg: str) -> None:
+    """Display profile differences."""
+    print("\n  Profile comparison:")
+    print("  ┌─────────────┬──────────┬──────────┐")
+    print("  │             │  Source  │  Target  │")
+    print("  ├─────────────┼──────────┼──────────┤")
+    for key in ["skepticism", "literalism", "empathy"]:
+        src_val = source_disp.get(key, 3)
+        tgt_val = target_disp.get(key, 3)
+        marker = " *" if src_val != tgt_val else "  "
+        print(f"  │ {key:<11} │    {src_val}     │    {tgt_val}    │{marker}")
+    print("  └─────────────┴──────────┴──────────┘")
+    if source_bg != target_bg:
+        print(f"  Background: source={len(source_bg)} chars, target={len(target_bg)} chars *")
+    print()
+
+
+def ask_profile_action(source_disp: dict, target_disp: dict, source_bg: str, target_bg: str) -> str:
+    """Ask user what to do with differing profiles."""
+    show_profile_diff(source_disp, target_disp, source_bg, target_bg)
+    print("  Profile differs. What to do?")
+    print("    1. Keep target profile (default)")
+    print("    2. Replace with source profile")
+    print("    3. Abort import")
+    choice = input("  Choice [1]: ").strip()
+    if choice == "2":
+        return "replace"
+    elif choice == "3":
+        return "abort"
+    return "keep"
+
+
 async def import_bank(
     pool: asyncpg.Pool,
     target_bank_id: str,
     data: dict,
     mode: str = "merge-smart",
     dry_run: bool = False,
+    profile_action: str = "ask",  # "keep", "replace", "ask"
 ) -> dict:
     """Import bank data with UUID remapping."""
     stats = {
@@ -494,18 +527,50 @@ async def import_bank(
         if dry_run:
             return await analyze_import(conn, target_bank_id, data, mode)
 
+        # Check existing bank profile BEFORE transaction
+        existing_bank = await conn.fetchrow(
+            "SELECT disposition, background FROM banks WHERE bank_id = $1",
+            target_bank_id,
+        )
+
+        # Determine profile update action
+        update_profile = False
+        if existing_bank is None:
+            # New bank - always use source profile
+            update_profile = True
+        elif mode == "replace":
+            # Replace mode - always overwrite
+            update_profile = True
+        else:
+            # Merge modes - check if profiles differ
+            target_disposition = dict(existing_bank["disposition"]) if existing_bank["disposition"] else {}
+            target_background = existing_bank["background"] or ""
+
+            profiles_differ = (
+                source_disposition != target_disposition or
+                source_background != target_background
+            )
+
+            if profiles_differ:
+                if profile_action == "ask":
+                    action = ask_profile_action(
+                        source_disposition, target_disposition,
+                        source_background, target_background
+                    )
+                    if action == "abort":
+                        print("Import aborted by user.")
+                        return stats
+                    update_profile = (action == "replace")
+                elif profile_action == "replace":
+                    update_profile = True
+                # else: profile_action == "keep" -> update_profile stays False
+
         async with conn.transaction():
             # 1. Handle mode
             if mode == "replace":
                 await delete_bank_data(conn, target_bank_id)
 
             # 2. Ensure bank exists and update profile
-            # Check if bank exists
-            existing_bank = await conn.fetchrow(
-                "SELECT disposition, background FROM banks WHERE bank_id = $1",
-                target_bank_id,
-            )
-
             if existing_bank is None:
                 # Create new bank with source profile
                 await conn.execute(
@@ -518,7 +583,7 @@ async def import_bank(
                     source_background,
                 )
                 stats["profile_updated"] = True
-            elif mode == "replace":
+            elif update_profile:
                 # Update existing bank with source profile
                 await conn.execute(
                     """
@@ -530,7 +595,6 @@ async def import_bank(
                     source_background,
                 )
                 stats["profile_updated"] = True
-            # In merge modes, keep existing profile (don't overwrite)
 
             # 3. Build remap tables
             uuid_map: dict[str, UUID] = {}  # For entities, units (UUID columns)
@@ -875,6 +939,7 @@ async def import_from_sql_backup(
     backup_path: Path,
     source_bank_id: str | None = None,
     mode: str = "merge-smart",
+    profile_action: str = "ask",
 ) -> dict:
     """Import bank from PostgreSQL SQL dump."""
     # Read and decompress
@@ -901,7 +966,7 @@ async def import_from_sql_backup(
                 f"Please specify --source-bank"
             )
 
-    return await import_bank(pool, target_bank_id, data, mode)
+    return await import_bank(pool, target_bank_id, data, mode, profile_action=profile_action)
 
 
 # --- Interactive Mode ---
@@ -1015,14 +1080,28 @@ async def interactive_import(pool: asyncpg.Pool, config: dict) -> None:
     # Dry run first
     print("\nAnalyzing import...")
     stats = await import_bank(pool, target_bank, data, mode, dry_run=True)
-    print_box("Dry Run Results", [
+
+    # Show facts breakdown
+    facts_by_type = stats.get("facts_by_type", {})
+    facts_lines = [
         f"Documents to import: {stats.get('documents_to_import', 0)}",
         f"Documents to skip: {stats.get('documents_to_skip', 0)}",
         f"Facts to import: {stats.get('units_to_import', 0)}",
+        f"  - world: {facts_by_type.get('world', 0)}",
+        f"  - opinions: {facts_by_type.get('opinion', 0)}",
+        f"  - observations: {facts_by_type.get('observation', 0)}",
         f"Facts to skip: {stats.get('units_to_skip', 0)}",
         f"Entities to import: {stats.get('entities_to_import', 0)}",
         f"Entities to merge: {stats.get('entities_to_merge', 0)}",
-    ])
+    ]
+
+    # Show profile comparison if differs
+    profile_cmp = stats.get("profile_comparison", {})
+    if profile_cmp.get("disposition_differs") or profile_cmp.get("background_differs"):
+        facts_lines.append("")
+        facts_lines.append("Profile differs! (will prompt during import)")
+
+    print_box("Dry Run Results", facts_lines)
 
     proceed = input("\nProceed with import? [y/N]: ").strip().lower()
     if proceed != "y":
@@ -1178,6 +1257,12 @@ def main():
     import_p.add_argument(
         "--dry-run", action="store_true", help="Analyze without importing"
     )
+    import_p.add_argument(
+        "--profile",
+        choices=["ask", "keep", "replace"],
+        default="ask",
+        help="Profile conflict action: ask (interactive), keep target, replace with source (default: ask)",
+    )
 
     # Import from SQL backup
     backup_p = subparsers.add_parser(
@@ -1191,6 +1276,12 @@ def main():
         choices=["merge-smart", "merge", "replace"],
         default="merge-smart",
         help="Import mode",
+    )
+    backup_p.add_argument(
+        "--profile",
+        choices=["ask", "keep", "replace"],
+        default="ask",
+        help="Profile conflict action: ask (interactive), keep target, replace with source (default: ask)",
     )
 
     # Info
@@ -1298,7 +1389,8 @@ async def async_main(args):
             with open(args.file) as f:
                 data = json.load(f)
             stats = await import_bank(
-                pool, args.bank_id, data, args.mode, args.dry_run
+                pool, args.bank_id, data, args.mode, args.dry_run,
+                profile_action=args.profile
             )
             if args.dry_run:
                 print("DRY RUN - no changes made")
@@ -1316,6 +1408,7 @@ async def async_main(args):
                 Path(args.file),
                 args.source_bank,
                 args.mode,
+                profile_action=args.profile,
             )
             print("✓ Import complete")
             for k, v in stats.items():
