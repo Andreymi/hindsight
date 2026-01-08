@@ -1349,6 +1349,12 @@ async def async_main(args):
             # Show profile info
             if bank_data:
                 disposition = bank_data.get("disposition", {})
+                # Parse if string
+                if isinstance(disposition, str):
+                    try:
+                        disposition = json.loads(disposition)
+                    except json.JSONDecodeError:
+                        disposition = {}
                 background = bank_data.get("background", "")
                 print(f"  Disposition: skepticism={disposition.get('skepticism', 3)}, "
                       f"literalism={disposition.get('literalism', 3)}, "
