@@ -455,8 +455,8 @@ async def import_bank(
             # 2. Ensure bank exists
             await conn.execute(
                 """
-                INSERT INTO banks (bank_id, disposition, background)
-                VALUES ($1, '{"skepticism": 3, "literalism": 3, "empathy": 3}'::jsonb, '')
+                INSERT INTO banks (bank_id, name, disposition, background)
+                VALUES ($1, $1, '{"skepticism": 3, "literalism": 3, "empathy": 3}'::jsonb, '')
                 ON CONFLICT (bank_id) DO NOTHING
                 """,
                 target_bank_id,
