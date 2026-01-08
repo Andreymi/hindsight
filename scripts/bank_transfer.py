@@ -367,7 +367,48 @@ async def analyze_import(
         "units_to_skip": 0,
         "entities_to_import": 0,
         "entities_to_merge": 0,
+        "facts_by_type": {"world": 0, "opinion": 0, "observation": 0},
+        "profile_comparison": {},
     }
+
+    # Analyze facts by type
+    for unit in data.get("memory_units", []):
+        fact_type = unit.get("fact_type", "world")
+        if fact_type in stats["facts_by_type"]:
+            stats["facts_by_type"][fact_type] += 1
+
+    # Compare profiles
+    bank_data = data.get("bank", {})
+    source_disposition = bank_data.get("disposition", {})
+    source_background = bank_data.get("background", "")
+
+    existing_bank = await conn.fetchrow(
+        "SELECT disposition, background FROM banks WHERE bank_id = $1",
+        target_bank_id,
+    )
+
+    if existing_bank:
+        target_disposition = dict(existing_bank["disposition"]) if existing_bank["disposition"] else {}
+        target_background = existing_bank["background"] or ""
+        stats["profile_comparison"] = {
+            "source_disposition": source_disposition,
+            "target_disposition": target_disposition,
+            "disposition_differs": source_disposition != target_disposition,
+            "source_background_len": len(source_background),
+            "target_background_len": len(target_background),
+            "background_differs": source_background != target_background,
+            "will_update": mode == "replace",
+        }
+    else:
+        stats["profile_comparison"] = {
+            "source_disposition": source_disposition,
+            "target_disposition": None,
+            "disposition_differs": True,
+            "source_background_len": len(source_background),
+            "target_background_len": 0,
+            "background_differs": bool(source_background),
+            "will_update": True,  # New bank, will use source profile
+        }
 
     if mode == "replace":
         stats["documents_to_import"] = len(data.get("documents", []))
@@ -441,7 +482,13 @@ async def import_bank(
         "entities_imported": 0,
         "entities_merged": 0,
         "links_imported": 0,
+        "profile_updated": False,
     }
+
+    # Get bank profile from export data
+    bank_data = data.get("bank", {})
+    source_disposition = bank_data.get("disposition", {"skepticism": 3, "literalism": 3, "empathy": 3})
+    source_background = bank_data.get("background", "")
 
     async with pool.acquire() as conn:
         if dry_run:
@@ -452,15 +499,38 @@ async def import_bank(
             if mode == "replace":
                 await delete_bank_data(conn, target_bank_id)
 
-            # 2. Ensure bank exists
-            await conn.execute(
-                """
-                INSERT INTO banks (bank_id, name, disposition, background)
-                VALUES ($1, $1, '{"skepticism": 3, "literalism": 3, "empathy": 3}'::jsonb, '')
-                ON CONFLICT (bank_id) DO NOTHING
-                """,
+            # 2. Ensure bank exists and update profile
+            # Check if bank exists
+            existing_bank = await conn.fetchrow(
+                "SELECT disposition, background FROM banks WHERE bank_id = $1",
                 target_bank_id,
             )
+
+            if existing_bank is None:
+                # Create new bank with source profile
+                await conn.execute(
+                    """
+                    INSERT INTO banks (bank_id, name, disposition, background)
+                    VALUES ($1, $1, $2::jsonb, $3)
+                    """,
+                    target_bank_id,
+                    json.dumps(source_disposition),
+                    source_background,
+                )
+                stats["profile_updated"] = True
+            elif mode == "replace":
+                # Update existing bank with source profile
+                await conn.execute(
+                    """
+                    UPDATE banks SET disposition = $2::jsonb, background = $3
+                    WHERE bank_id = $1
+                    """,
+                    target_bank_id,
+                    json.dumps(source_disposition),
+                    source_background,
+                )
+                stats["profile_updated"] = True
+            # In merge modes, keep existing profile (don't overwrite)
 
             # 3. Build remap tables
             uuid_map: dict[str, UUID] = {}  # For entities, units (UUID columns)
@@ -1163,16 +1233,37 @@ async def async_main(args):
             with open(args.file) as f:
                 data = json.load(f)
             meta = data.get("meta", {})
+            bank_data = data.get("bank", {})
+
+            # Count facts by type
+            facts_by_type = {"world": 0, "opinion": 0, "observation": 0}
+            for unit in data.get("memory_units", []):
+                fact_type = unit.get("fact_type", "world")
+                if fact_type in facts_by_type:
+                    facts_by_type[fact_type] += 1
+
             print(f"Export file: {args.file}")
             print(f"  Version: {meta.get('version')}")
             print(f"  Source bank: {meta.get('source_bank_id')}")
             print(f"  Exported at: {meta.get('exported_at')}")
             print(f"  Documents: {len(data.get('documents', []))}")
             print(f"  Facts: {len(data.get('memory_units', []))}")
+            print(f"    - world: {facts_by_type['world']}")
+            print(f"    - opinions: {facts_by_type['opinion']}")
+            print(f"    - observations: {facts_by_type['observation']}")
             print(f"  Entities: {len(data.get('entities', []))}")
             print(f"  Embeddings: {'yes' if meta.get('include_embeddings') else 'no'}")
             if meta.get("embedding_dimension"):
                 print(f"  Embedding dim: {meta.get('embedding_dimension')}")
+            # Show profile info
+            if bank_data:
+                disposition = bank_data.get("disposition", {})
+                background = bank_data.get("background", "")
+                print(f"  Disposition: skepticism={disposition.get('skepticism', 3)}, "
+                      f"literalism={disposition.get('literalism', 3)}, "
+                      f"empathy={disposition.get('empathy', 3)}")
+                if background:
+                    print(f"  Background: {len(background)} chars")
         return
 
     if args.command == "list-backup":
