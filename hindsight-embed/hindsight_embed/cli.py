@@ -411,6 +411,111 @@ def _do_configure_interactive():
     return 0
 
 
+def do_init(args):
+    """Initialize local project config (.hindsight/embed in current directory).
+
+    Similar to 'git init' - creates a minimal local config that overrides
+    global settings for this project directory.
+    """
+    # Check if local config already exists
+    if LOCAL_CONFIG_FILE.exists():
+        print(f"\033[33m⚠\033[0m  Local config already exists: {LOCAL_CONFIG_FILE}")
+        print("    Edit it directly or delete to reinitialize.")
+        return 1
+
+    # Check if global config exists (required for inheritance)
+    if not CONFIG_FILE.exists() and not CONFIG_FILE_ALT.exists():
+        print("\033[33m⚠\033[0m  No global config found. Run 'hindsight-embed configure' first.")
+        print("    Local config inherits settings (API key, model) from global config.")
+        return 1
+
+    # Determine default bank_id from directory name
+    default_bank_id = Path.cwd().name.lower().replace(" ", "-").replace("_", "-")
+
+    # Interactive prompt for bank_id
+    if sys.stdin.isatty():
+        print()
+        print("\033[1m\033[36m  Initializing Hindsight for this project\033[0m")
+        print()
+        bank_id = _prompt_text("Memory bank ID for this project", default=default_bank_id)
+        if bank_id is None:
+            print("\n\033[33m⚠\033[0m Initialization cancelled.")
+            return 1
+    else:
+        bank_id = default_bank_id
+
+    # Create local config directory and file
+    LOCAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    with open(LOCAL_CONFIG_FILE, "w") as f:
+        f.write(f"# Local Hindsight config for: {Path.cwd().name}\n")
+        f.write("# Other settings inherited from ~/.hindsight/embed\n\n")
+        f.write(f"HINDSIGHT_EMBED_BANK_ID={bank_id}\n")
+
+    print()
+    print(f"\033[32m✓\033[0m  Initialized Hindsight in {LOCAL_CONFIG_DIR}/")
+    print(f"    Bank ID: \033[36m{bank_id}\033[0m")
+    print()
+    print("    \033[2mAdd to .gitignore:\033[0m")
+    print("      echo '.hindsight/' >> .gitignore")
+    print()
+
+    return 0
+
+
+def maybe_suggest_init() -> bool:
+    """Check if we should suggest 'hindsight-embed init'.
+
+    Returns True if user chose to skip (continue with global config).
+    Returns False if user wants to init (caller should exit).
+    """
+    # Only suggest if:
+    # 1. No local config exists
+    # 2. Global config exists
+    # 3. We're in an interactive terminal
+    # 4. Current directory looks like a project (has .git or common project files)
+
+    if LOCAL_CONFIG_FILE.exists():
+        return True  # Local config exists, continue
+
+    if not CONFIG_FILE.exists() and not CONFIG_FILE_ALT.exists():
+        return True  # No global config, will fail later with proper message
+
+    if not sys.stdin.isatty():
+        return True  # Non-interactive, continue with global
+
+    # Check if this looks like a project directory
+    project_markers = [".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Makefile"]
+    is_project = any((Path.cwd() / marker).exists() for marker in project_markers)
+
+    if not is_project:
+        return True  # Not a project directory, use global
+
+    # Suggest init
+    print()
+    print(f"\033[33m💡\033[0m No local config found in \033[36m{Path.cwd().name}/\033[0m")
+    print()
+    print("   \033[2mOptions:\033[0m")
+    print("   \033[36m1)\033[0m Initialize local config (recommended for projects)")
+    print("   \033[36m2)\033[0m Use global config (~/.hindsight/embed)")
+    print()
+
+    try:
+        response = input("   Choose [1]: ").strip()
+        if response == "2":
+            print()
+            return True  # Continue with global
+        else:
+            print()
+            # Run init
+            import argparse
+            do_init(argparse.Namespace())
+            return True  # Continue after init
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return True  # Continue with global on interrupt
+
+
 def do_daemon(args, config: dict, logger):
     """Handle daemon subcommands."""
     from pathlib import Path
@@ -510,6 +615,12 @@ def main():
             exit_code = do_configure(None)
             sys.exit(exit_code)
 
+        # Handle init (create local project config)
+        if command == "init":
+            logger = setup_logging(False)
+            exit_code = do_init(None)
+            sys.exit(exit_code)
+
         # Handle daemon subcommands
         if command == "daemon":
             # Parse daemon subcommand
@@ -534,6 +645,10 @@ def main():
             sys.exit(0)
 
         # Forward all other commands to hindsight-cli
+
+        # Suggest init if no local config and this looks like a project
+        maybe_suggest_init()
+
         config = get_config()
 
         # Check for LLM API key
@@ -560,7 +675,8 @@ def print_help():
 Usage: hindsight-embed <command> [options]
 
 Built-in commands:
-    configure              Interactive configuration setup
+    init                   Initialize local project config (.hindsight/embed)
+    configure              Interactive global configuration setup
     daemon start           Start the background daemon
     daemon stop            Stop the daemon
     daemon status          Check daemon status
@@ -573,12 +689,17 @@ CLI commands (forwarded to hindsight-cli):
     bank list                        List memory banks
     ...                              Run 'hindsight --help' for all commands
 
+Configuration priority:
+    1. Environment variables (highest)
+    2. .hindsight/embed (local, project-specific)
+    3. ~/.hindsight/embed (global, user defaults)
+
 Examples:
-    hindsight-embed configure
+    hindsight-embed init                              # Init local config for project
+    hindsight-embed configure                         # Setup global config
     hindsight-embed memory retain default "User prefers dark mode"
     hindsight-embed memory recall default "user preferences"
     hindsight-embed daemon status
-    hindsight-embed daemon logs -f
 """)
 
 
