@@ -98,10 +98,9 @@ async def get_db_connection(config: dict, instance_name: str | None = None) -> a
         db_url = await get_pg0_uri(instance_name)
 
     if not db_url:
-        # Try default pg0 instance based on bank_id
-        bank_id = config.get("bank_id", "default")
-        pg0_instance = f"hindsight-embed-{bank_id}"
-        db_url = await get_pg0_uri(pg0_instance)
+        # Try default pg0 instance (single instance for all banks)
+        # Bank isolation is handled at API level via bank_id, not at database level
+        db_url = await get_pg0_uri("hindsight-embed")
 
     if not db_url:
         raise RuntimeError(
