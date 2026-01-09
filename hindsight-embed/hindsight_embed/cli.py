@@ -563,8 +563,11 @@ def do_daemon(args, config: dict, logger):
                     pid = lockfile.read_text().strip()
                 except Exception:
                     pass
+            idle_timeout = daemon_client.get_idle_timeout()
+            timeout_str = f"{idle_timeout}s" if idle_timeout > 0 else "disabled (runs forever)"
             print(f"Daemon is running (PID: {pid})")
             print(f"  URL: http://127.0.0.1:{daemon_client.DAEMON_PORT}")
+            print(f"  Idle timeout: {timeout_str}")
             print(f"  Logs: {daemon_log_path}")
             return 0
         else:
@@ -717,6 +720,11 @@ Configuration priority:
     1. Environment variables (HINDSIGHT_EMBED_*)
     2. .hindsight/embed (local, project-specific)
     3. ~/.hindsight/embed (global, user defaults)
+
+Daemon idle timeout (set HINDSIGHT_EMBED_IDLE_TIMEOUT):
+    300                              Default (5 min auto-exit)
+    0                                Disable auto-exit (run forever)
+    3600                             1 hour, etc.
 
 Examples:
     hindsight-embed memory retain mybank "User prefers dark mode" --async
