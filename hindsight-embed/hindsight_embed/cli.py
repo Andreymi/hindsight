@@ -10,7 +10,12 @@ Usage:
     hindsight-embed recall "What are user preferences?"
     hindsight-embed daemon status          # Check daemon status
 
-Environment variables:
+Configuration files (in priority order):
+    1. .hindsight/embed      (local, in current working directory - project-specific)
+    2. ~/.hindsight/embed    (global, user-level defaults)
+    3. ~/.hindsight/config.env (global, alternative location)
+
+Environment variables (highest priority, override config files):
     HINDSIGHT_EMBED_LLM_API_KEY: Required. API key for LLM provider.
     HINDSIGHT_EMBED_LLM_PROVIDER: Optional. LLM provider (default: "openai").
     HINDSIGHT_EMBED_LLM_MODEL: Optional. LLM model (default: "gpt-4o-mini").
@@ -23,9 +28,14 @@ import os
 import sys
 from pathlib import Path
 
+# Global config (user-level defaults)
 CONFIG_DIR = Path.home() / ".hindsight"
 CONFIG_FILE = CONFIG_DIR / "embed"
 CONFIG_FILE_ALT = CONFIG_DIR / "config.env"  # Alternative config file location
+
+# Local config (project-specific, higher priority)
+LOCAL_CONFIG_DIR = Path.cwd() / ".hindsight"
+LOCAL_CONFIG_FILE = LOCAL_CONFIG_DIR / "embed"
 
 
 def setup_logging(verbose: bool = False):
@@ -51,9 +61,19 @@ def setup_logging(verbose: bool = False):
 
 
 def load_config_file():
-    """Load configuration from file if it exists."""
-    # Check both config file locations
-    config_files = [CONFIG_FILE, CONFIG_FILE_ALT]
+    """Load configuration from file if it exists.
+
+    Priority (highest to lowest):
+    1. Environment variables (already set, never overridden)
+    2. Local config: .hindsight/embed in current working directory
+    3. Global config: ~/.hindsight/embed or ~/.hindsight/config.env
+    """
+    logger = logging.getLogger(__name__)
+
+    # Check config files in priority order: local first, then global
+    config_files = [LOCAL_CONFIG_FILE, CONFIG_FILE, CONFIG_FILE_ALT]
+    loaded_from = None
+
     for config_path in config_files:
         if config_path.exists():
             with open(config_path) as f:
@@ -66,6 +86,11 @@ def load_config_file():
                         key, value = line.split("=", 1)
                         if key not in os.environ:  # Don't override env vars
                             os.environ[key] = value
+            if loaded_from is None:
+                loaded_from = config_path
+
+    if loaded_from:
+        logger.debug(f"Loaded config from: {loaded_from}")
 
 
 def get_config():
@@ -79,8 +104,7 @@ def get_config():
         or os.environ.get("HINDSIGHT_API_LLM_PROVIDER", "openai"),
         "llm_model": os.environ.get("HINDSIGHT_EMBED_LLM_MODEL")
         or os.environ.get("HINDSIGHT_API_LLM_MODEL", "gpt-4o-mini"),
-        "llm_base_url": os.environ.get("HINDSIGHT_EMBED_LLM_BASE_URL")
-        or os.environ.get("HINDSIGHT_API_LLM_BASE_URL"),
+        "llm_base_url": os.environ.get("HINDSIGHT_EMBED_LLM_BASE_URL") or os.environ.get("HINDSIGHT_API_LLM_BASE_URL"),
         "bank_id": os.environ.get("HINDSIGHT_EMBED_BANK_ID", "default"),
     }
 
