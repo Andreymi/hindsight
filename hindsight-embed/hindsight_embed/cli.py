@@ -509,6 +509,7 @@ def maybe_suggest_init() -> bool:
             print()
             # Run init
             import argparse
+
             do_init(argparse.Namespace())
             return True  # Continue after init
     except (EOFError, KeyboardInterrupt):
@@ -674,32 +675,57 @@ def print_help():
 
 Usage: hindsight-embed <command> [options]
 
+Daemon runs on http://127.0.0.1:8889 (auto-starts on first command).
+
 Built-in commands:
     init                   Initialize local project config (.hindsight/embed)
     configure              Interactive global configuration setup
     daemon start           Start the background daemon
     daemon stop            Stop the daemon
-    daemon status          Check daemon status
+    daemon status          Check daemon status (shows port)
     daemon logs [-f] [-n]  View daemon logs
 
-CLI commands (forwarded to hindsight-cli):
+Memory commands:
     memory retain <bank> <content>   Store a memory
     memory recall <bank> <query>     Search memories
     memory reflect <bank> <query>    Generate contextual answer
+    memory retain-files <bank> <path>  Batch import from files
+    memory delete <bank> <unit_id>   Delete a memory unit
+    memory clear <bank>              Clear all memories
+
+Bank commands:
     bank list                        List memory banks
-    ...                              Run 'hindsight --help' for all commands
+    bank stats <bank>                Memory statistics
+    bank disposition <bank>          Bank personality traits
+    bank delete <bank>               Delete bank (irreversible!)
+
+Other commands:
+    document list|get|delete         Manage documents
+    entity list|get                  Manage entities
+    explore                          Interactive TUI (k9s-style)
+
+Common options:
+    -o json|yaml|pretty              Output format (use json for scripts)
+    -b low|mid|high                  Thinking budget (recall/reflect)
+    -t world,opinion,...             Filter by fact type (recall)
+    -c "context"                     Additional context (retain/reflect)
+    --async                          Background processing (retain)
+    --max-tokens N                   Limit response tokens (recall)
+    -v, --verbose                    Show full requests/responses
 
 Configuration priority:
-    1. Environment variables (highest)
+    1. Environment variables (HINDSIGHT_EMBED_*)
     2. .hindsight/embed (local, project-specific)
     3. ~/.hindsight/embed (global, user defaults)
 
 Examples:
-    hindsight-embed init                              # Init local config for project
-    hindsight-embed configure                         # Setup global config
-    hindsight-embed memory retain default "User prefers dark mode"
-    hindsight-embed memory recall default "user preferences"
+    hindsight-embed memory retain mybank "User prefers dark mode" --async
+    hindsight-embed memory recall mybank "preferences" -b high -o json
+    hindsight-embed memory retain-files mybank ./docs/ --context docs
+    hindsight-embed bank stats mybank -o json
     hindsight-embed daemon status
+
+For command details: hindsight-embed <command> --help
 """)
 
 
