@@ -29,15 +29,26 @@ CLI_INSTALLER_URL = "https://hindsight.vectorize.io/get-cli"
 
 
 def _find_hindsight_api_command() -> list[str]:
-    """Find the command to run hindsight-api."""
-    # Check if we're in development mode (local hindsight-api available)
-    # Path: daemon_client.py -> hindsight_embed/ -> hindsight-embed/ -> memory-poc/
+    """Find the command to run hindsight-api.
+
+    Priority:
+    1. Development mode: relative path to hindsight-api project (for dev in monorepo)
+    2. Global install: hindsight-api in PATH (via uv tool install)
+    3. Fallback: uvx hindsight-api (downloads from PyPI)
+    """
+    import shutil
+
+    # 1. Check if we're in development mode (local hindsight-api available)
+    # Path: daemon_client.py -> hindsight_embed/ -> hindsight-embed/ -> monorepo/
     dev_api_path = Path(__file__).parent.parent.parent / "hindsight-api"
     if dev_api_path.exists() and (dev_api_path / "pyproject.toml").exists():
-        # Use uv run with the local project
         return ["uv", "run", "--project", str(dev_api_path), "hindsight-api"]
 
-    # Fall back to uvx for installed version
+    # 2. Check if hindsight-api is installed globally (via uv tool install)
+    if shutil.which("hindsight-api"):
+        return ["hindsight-api"]
+
+    # 3. Fall back to uvx (downloads from PyPI on first use)
     return ["uvx", "hindsight-api"]
 
 
@@ -72,9 +83,10 @@ def _start_daemon(config: dict) -> bool:
     if config.get("llm_base_url"):
         env["HINDSIGHT_API_LLM_BASE_URL"] = config["llm_base_url"]
 
-    # Use pg0 database specific to bank
-    bank_id = config.get("bank_id", "default")
-    env["HINDSIGHT_API_DATABASE_URL"] = f"pg0://hindsight-embed-{bank_id}"
+    # Use fixed pg0 database name for ALL banks.
+    # Bank isolation is handled at API level via bank_id in requests, not at database level.
+    # Using dynamic names per bank_id creates separate PostgreSQL instances that don't share data.
+    env["HINDSIGHT_API_DATABASE_URL"] = "pg0://hindsight-embed"
     env["HINDSIGHT_API_LOG_LEVEL"] = "info"
 
     cmd = _find_hindsight_api_command() + ["--daemon", "--idle-timeout", str(DAEMON_IDLE_TIMEOUT)]
