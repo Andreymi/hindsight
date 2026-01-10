@@ -563,8 +563,14 @@ def do_daemon(args, config: dict, logger):
                     pid = lockfile.read_text().strip()
                 except Exception:
                     pass
-            idle_timeout = daemon_client.get_idle_timeout()
-            timeout_str = f"{idle_timeout}s" if idle_timeout > 0 else "disabled (runs forever)"
+            # Get actual idle timeout from running daemon's command line
+            idle_timeout = daemon_client.get_running_daemon_idle_timeout()
+            if idle_timeout is None:
+                timeout_str = "unknown"
+            elif idle_timeout > 0:
+                timeout_str = f"{idle_timeout}s"
+            else:
+                timeout_str = "disabled (runs forever)"
             print(f"Daemon is running (PID: {pid})")
             print(f"  URL: http://127.0.0.1:{daemon_client.DAEMON_PORT}")
             print(f"  Idle timeout: {timeout_str}")

@@ -212,6 +212,51 @@ def stop_daemon() -> bool:
     return not _is_daemon_running()
 
 
+def get_running_daemon_idle_timeout() -> int | None:
+    """
+    Get the actual idle timeout from the running daemon's command line.
+
+    Returns the idle timeout in seconds, or None if daemon is not running
+    or timeout cannot be determined.
+    """
+    import re
+    import subprocess
+
+    # Get PID from lockfile
+    lockfile = Path.home() / ".hindsight" / "daemon.lock"
+    if not lockfile.exists():
+        return None
+
+    try:
+        pid = lockfile.read_text().strip()
+    except Exception:
+        return None
+
+    # Get command line arguments using ps
+    try:
+        result = subprocess.run(
+            ["ps", "-p", pid, "-o", "args="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+
+        cmdline = result.stdout.strip()
+
+        # Parse --idle-timeout=N or --idle-timeout N
+        match = re.search(r"--idle-timeout[=\s](\d+)", cmdline)
+        if match:
+            return int(match.group(1))
+
+        # No --idle-timeout found means default (0 = no auto-exit)
+        return 0
+
+    except Exception:
+        return None
+
+
 def find_cli_binary() -> Path | None:
     """Find the hindsight CLI binary in known locations or PATH."""
     import shutil
