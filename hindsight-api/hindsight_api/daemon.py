@@ -2,12 +2,26 @@
 Daemon mode support for Hindsight API.
 
 Provides idle timeout and lockfile management for running as a background daemon.
+
+NOTE on daemonization strategy:
+We use subprocess.Popen instead of the traditional Unix double-fork (os.fork)
+because fork() breaks MPS (Metal Performance Shaders) on macOS.
+
+The problem: When PyTorch/SentenceTransformers imports, it initializes Metal
+and opens an XPC connection to the GPU compiler service. XPC connections are
+kernel resources that cannot survive fork() - they become invalid in the child
+process. This causes "XPC_ERROR_CONNECTION_INVALID" crashes on first GPU use.
+
+Solution: spawn_daemon_subprocess() starts a completely NEW process via
+subprocess.Popen with start_new_session=True. The new process initializes
+Metal from scratch with valid XPC connections.
 """
 
 import asyncio
 import fcntl
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -134,8 +148,19 @@ def daemonize():
     """
     Fork the current process into a background daemon.
 
+    DEPRECATED: This function uses double-fork which breaks MPS on macOS.
+    Use spawn_daemon_subprocess() instead.
+
     Uses double-fork technique to properly detach from terminal.
     """
+    import warnings
+
+    warnings.warn(
+        "daemonize() uses fork() which breaks MPS on macOS. Use spawn_daemon_subprocess() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     # First fork
     pid = os.fork()
     if pid > 0:
@@ -164,6 +189,59 @@ def daemonize():
     log_fd = open(DAEMON_LOG_PATH, "a")
     os.dup2(log_fd.fileno(), sys.stdout.fileno())
     os.dup2(log_fd.fileno(), sys.stderr.fileno())
+
+
+def spawn_daemon_subprocess(idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> int:
+    """
+    Spawn daemon as a new subprocess instead of forking.
+
+    This is safe for MPS (Metal Performance Shaders) on macOS because the new
+    process initializes GPU resources from scratch, rather than inheriting
+    broken XPC connections from a forked parent.
+
+    Args:
+        idle_timeout: Idle timeout in seconds (0 = no auto-exit)
+
+    Returns:
+        PID of the spawned daemon process
+    """
+    import shutil
+
+    # Find the hindsight-api executable
+    hindsight_api_path = shutil.which("hindsight-api")
+
+    if hindsight_api_path:
+        cmd = [hindsight_api_path]
+    else:
+        # Fallback: run as module
+        cmd = [sys.executable, "-m", "hindsight_api.main"]
+
+    # Add internal daemon-child flag (runs as daemon without forking)
+    cmd.append("--_daemon-child")
+
+    # Pass idle timeout
+    if idle_timeout > 0:
+        cmd.append(f"--idle-timeout={idle_timeout}")
+
+    # Ensure log directory exists
+    DAEMON_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Open log file for stdout/stderr
+    log_file = open(DAEMON_LOG_PATH, "a")
+
+    # Spawn new process with clean memory (no fork!)
+    process = subprocess.Popen(
+        cmd,
+        stdout=log_file,
+        stderr=log_file,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # Equivalent to setsid() - detaches from terminal
+        env=os.environ.copy(),  # Pass all environment variables
+        close_fds=True,  # Close parent's file descriptors
+    )
+
+    logger.info(f"Spawned daemon subprocess with PID {process.pid}")
+    return process.pid
 
 
 def check_daemon_running(port: int = DEFAULT_DAEMON_PORT) -> bool:

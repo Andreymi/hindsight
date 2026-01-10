@@ -25,11 +25,12 @@ from .api import create_app
 from .banner import print_banner
 from .config import DEFAULT_WORKERS, ENV_WORKERS, HindsightConfig, get_config
 from .daemon import (
+    DAEMON_LOG_PATH,
     DEFAULT_DAEMON_PORT,
     DEFAULT_IDLE_TIMEOUT,
     DaemonLock,
     IdleTimeoutMiddleware,
-    daemonize,
+    spawn_daemon_subprocess,
 )
 from .extensions import DefaultExtensionContext, OperationValidatorExtension, TenantExtension, load_extension
 
@@ -132,26 +133,42 @@ def main():
         help=f"Idle timeout in seconds before auto-exit in daemon mode (default: {DEFAULT_IDLE_TIMEOUT})",
     )
 
+    # Internal flag for daemon child process (not shown in help)
+    # When --daemon is used, we spawn a subprocess with --_daemon-child
+    # This avoids fork() which breaks MPS on macOS
+    parser.add_argument(
+        "--_daemon-child",
+        action="store_true",
+        help=argparse.SUPPRESS,  # Hidden from --help
+    )
+
     args = parser.parse_args()
 
     # Daemon mode handling
+    # We use subprocess instead of fork() to avoid breaking MPS on macOS
     if args.daemon:
+        # Check if another daemon is already running
+        daemon_lock = DaemonLock()
+        if daemon_lock.is_locked():
+            print(f"Daemon already running (PID: {daemon_lock.get_pid()})", file=sys.stderr)
+            sys.exit(1)
+
+        # Spawn daemon as subprocess (safe for MPS - no fork!)
+        pid = spawn_daemon_subprocess(idle_timeout=args.idle_timeout)
+        print(f"Daemon started (PID: {pid})")
+        print(f"  Logs: {DAEMON_LOG_PATH}")
+        sys.exit(0)
+
+    # Internal: daemon child process (spawned by --daemon)
+    if args._daemon_child:
         # Use fixed daemon port
         args.port = DEFAULT_DAEMON_PORT
         args.host = "127.0.0.1"  # Only bind to localhost for security
 
-        # Check if another daemon is already running
+        # Acquire lock (we're the daemon now)
         daemon_lock = DaemonLock()
         if not daemon_lock.acquire():
-            print(f"Daemon already running (PID: {daemon_lock.get_pid()})", file=sys.stderr)
-            sys.exit(1)
-
-        # Fork into background
-        daemonize()
-
-        # Re-acquire lock in child process
-        daemon_lock = DaemonLock()
-        if not daemon_lock.acquire():
+            # Another daemon started between parent check and our start
             sys.exit(1)
 
         # Register cleanup to release lock
@@ -161,7 +178,7 @@ def main():
         atexit.register(release_lock)
 
     # Print banner (not in daemon mode)
-    if not args.daemon:
+    if not args._daemon_child:
         print()
         print_banner()
 
@@ -223,7 +240,7 @@ def main():
             task_backend_memory_batch_interval=config.task_backend_memory_batch_interval,
         )
     config.configure_logging()
-    if not args.daemon:
+    if not args._daemon_child:
         config.log_config()
 
     # Register cleanup handlers
@@ -272,7 +289,7 @@ def main():
 
     # Wrap with idle timeout middleware in daemon mode
     idle_middleware = None
-    if args.daemon:
+    if args._daemon_child:
         idle_middleware = IdleTimeoutMiddleware(app, idle_timeout=args.idle_timeout)
         app = idle_middleware
 
@@ -313,7 +330,7 @@ def main():
         uvicorn_config["ssl_certfile"] = args.ssl_certfile
 
     # Print startup info (not in daemon mode)
-    if not args.daemon:
+    if not args._daemon_child:
         from .banner import print_startup_info
 
         print_startup_info(
