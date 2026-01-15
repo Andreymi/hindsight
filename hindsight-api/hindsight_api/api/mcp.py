@@ -200,7 +200,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         """
         try:
             banks = await memory.list_banks(request_context=RequestContext())
-            return json.dumps({"banks": banks}, indent=2)
+            return json.dumps({"banks": banks}, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error listing banks: {e}", exc_info=True)
             return f'{{"error": "{e}", "banks": []}}'
@@ -236,7 +236,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
             # Serialize disposition if it's a Pydantic model
             if "disposition" in profile and hasattr(profile["disposition"], "model_dump"):
                 profile["disposition"] = profile["disposition"].model_dump()
-            return json.dumps(profile, indent=2)
+            return json.dumps(profile, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error creating bank: {e}", exc_info=True)
             return f'{{"error": "{e}"}}'
@@ -336,7 +336,7 @@ class MCPMiddleware:
 
     async def _send_error(self, send, status: int, message: str):
         """Send an error response."""
-        body = json.dumps({"error": message}).encode()
+        body = json.dumps({"error": message}, ensure_ascii=False).encode()
         await send(
             {
                 "type": "http.response.start",
