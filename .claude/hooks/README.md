@@ -100,10 +100,16 @@ Claude Code hooks для автоматической интеграции с Hi
 - Минимум 30 символов
 - Игнорирует: `ок`, `да`, `нет`, `спасибо`, `понял`, `1`, `2`, `y`, `n`, etc.
 
+**Throttling:**
+- Кеш: `~/.hindsight/cache/prompt-{hash}.cache`
+- TTL: 45 секунд
+- Повторные запросы используют кеш (~450x быстрее)
+
 **Конфигурация:**
 - Timeout: 8 секунд
 - Budget: `low`
 - Max facts: 5
+- Cache TTL: 45 секунд
 
 ### hindsight-smart-stop.py
 
