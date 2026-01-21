@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 # hindsight-session-stop.sh
 # Анализирует сессию и сохраняет learnings в Hindsight
 #

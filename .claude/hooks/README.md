@@ -179,8 +179,57 @@ ln -s /path/to/patched/.claude/hooks ~/.claude/hooks
 cp -r /path/to/patched/.claude/hooks /your/project/.claude/
 ```
 
+## Логгирование
+
+Все hooks пишут логи в `~/.hindsight/hooks.log`.
+
+**Формат:** `YYYY-MM-DD HH:MM:SS [LEVEL] [HOOK] message`
+
+**Уровни:** `DEBUG`, `INFO`, `WARN`, `ERROR`
+
+**Настройка уровня:**
+```bash
+# В settings.local.json env или в shell
+export HINDSIGHT_HOOKS_LOG_LEVEL=DEBUG  # показывать все логи
+export HINDSIGHT_HOOKS_LOG_LEVEL=INFO   # default
+export HINDSIGHT_HOOKS_LOG_LEVEL=ERROR  # только ошибки
+```
+
+**Просмотр логов:**
+```bash
+# Последние записи
+tail -20 ~/.hindsight/hooks.log
+
+# Следить в реальном времени
+tail -f ~/.hindsight/hooks.log
+
+# Только ошибки
+grep ERROR ~/.hindsight/hooks.log
+```
+
+**Пример вывода:**
+```
+2026-01-21 22:22:02 [INFO] [user-prompt] Recall completed: 5 facts found
+2026-01-21 22:22:15 [INFO] [session-start] Loaded 6 facts for project patched
+2026-01-21 22:25:30 [INFO] [smart-stop] Retained learnings for project patched (512 chars)
+```
+
 ## Зависимости
 
+- **Bash 5+** — для ассоциативных массивов (macOS: `brew install bash`)
 - `jq` — для парсинга JSON в bash
 - `python3` — для smart-stop.py
-- `hindsight-embed` — CLI для Hindsight (должен быть установлен)
+- `hindsight-embed` — CLI для Hindsight
+
+### Установка Bash 5 на macOS
+
+```bash
+brew install bash
+
+# Проверка версии
+/opt/homebrew/bin/bash --version
+# GNU bash, version 5.3.9(1)-release
+
+# Скрипты используют shebang: #!/opt/homebrew/bin/bash
+# Системный bash остаётся /bin/bash (3.2)
+```
