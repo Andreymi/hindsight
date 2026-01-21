@@ -34,12 +34,16 @@ signal.signal(signal.SIGTERM, graceful_exit)
 signal.signal(signal.SIGINT, graceful_exit)
 
 # === LOGGING ===
-LOG_FILE = Path.home() / ".hindsight" / "hooks.log"
+# Используем локальные логи в проекте (CLAUDE_PROJECT_DIR), fallback на глобальные
+PROJECT_DIR = os.environ.get("CLAUDE_PROJECT_DIR")
+if PROJECT_DIR:
+    LOG_DIR = Path(PROJECT_DIR) / ".claude" / "hooks" / "logs"
+else:
+    LOG_DIR = Path.home() / ".hindsight"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / "hooks.log"
 LOG_LEVEL = os.environ.get("HINDSIGHT_HOOKS_LOG_LEVEL", "INFO")
 HOOK_NAME = "smart-stop"
-
-# Создаём директорию для логов
-LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
 class HookFormatter(logging.Formatter):
