@@ -49,7 +49,11 @@ hindsight-dev/benchmarks/consolidation/results/
 benchmarks/results/
 hindsight-cli/target
 hindsight-clients/rust/target
-.claude
+# Claude Code - exclude personal data, include shared configs
+.claude/*
+!.claude/hooks/
+!.claude/settings.local.json.example
+!.claude/README.md
 whats-next.md
 TASK.md
 # Changelog is now tracked in hindsight-docs/src/pages/changelog.md
