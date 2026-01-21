@@ -9,7 +9,14 @@
 trap 'exit 0' ERR SIGTERM SIGINT
 
 # === LOGGING ===
-LOG_FILE="${HOME}/.hindsight/hooks.log"
+# Используем локальные логи в проекте (CLAUDE_PROJECT_DIR), fallback на глобальные
+if [[ -n "$CLAUDE_PROJECT_DIR" ]]; then
+    LOG_DIR="$CLAUDE_PROJECT_DIR/.claude/hooks/logs"
+else
+    LOG_DIR="${HOME}/.hindsight"
+fi
+mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="${HOME}/.hindsight"
+LOG_FILE="$LOG_DIR/hooks.log"
 LOG_LEVEL="${HINDSIGHT_HOOKS_LOG_LEVEL:-INFO}"
 HOOK_NAME="session-start"
 
@@ -24,8 +31,6 @@ log() {
         echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] [$HOOK_NAME] $message" >> "$LOG_FILE" 2>/dev/null || true
     fi
 }
-
-mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
 # Читаем входные данные
 INPUT=$(cat) || exit 0
