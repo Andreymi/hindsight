@@ -1,0 +1,46 @@
+{
+  "env": {
+    "HINDSIGHT_BANK_ID": "your-bank-id",
+    "HINDSIGHT_EMBED_PATH": "/path/to/hindsight-embed"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PROJECT_ROOT}/.claude/hooks/hindsight-session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PROJECT_ROOT}/.claude/hooks/hindsight-user-prompt.sh",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${PROJECT_ROOT}/.claude/hooks/hindsight-smart-stop.py",
+            "timeout": 35
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": []
+  },
+  "enableAllProjectMcpServers": true,
+  "outputStyle": "Explanatory"
+}
