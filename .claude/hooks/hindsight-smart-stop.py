@@ -17,6 +17,7 @@ hindsight-smart-stop.py
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -34,6 +35,7 @@ signal.signal(signal.SIGINT, graceful_exit)
 BANK_ID = os.environ.get("HINDSIGHT_BANK_ID", "hindsight-dev")
 MIN_SESSION_TURNS = 4  # Минимум сообщений для анализа
 MAX_TRANSCRIPT_CHARS = 15000  # Лимит для анализа
+DEDUP_SIMILARITY_THRESHOLD = 0.35  # Порог схожести для дедупликации (снижен из-за метаданных в фактах)
 
 # Путь к локальному hindsight-embed
 HINDSIGHT_EMBED = os.environ.get(
@@ -99,6 +101,60 @@ def has_significant_content(text: str) -> bool:
     """Быстрая проверка на наличие значимого контента."""
     text_lower = text.lower()
     return any(pattern in text_lower for pattern in SIGNIFICANT_PATTERNS)
+
+
+# === ДЕДУПЛИКАЦИЯ ===
+
+def tokenize(text: str) -> set[str]:
+    """Разбивает текст на множество слов (lowercase, без пунктуации)."""
+    # Убираем пунктуацию, приводим к lowercase, разбиваем на слова
+    words = re.findall(r'\b\w{3,}\b', text.lower())  # Слова от 3 символов
+    return set(words)
+
+
+def jaccard_similarity(text1: str, text2: str) -> float:
+    """Вычисляет Jaccard similarity между двумя текстами."""
+    set1 = tokenize(text1)
+    set2 = tokenize(text2)
+    if not set1 or not set2:
+        return 0.0
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    return intersection / union if union > 0 else 0.0
+
+
+def check_for_duplicates(learnings: str) -> bool:
+    """
+    Проверяет есть ли уже похожие факты в памяти.
+    Возвращает True если найден дубликат.
+    """
+    # Берём первые 150 символов для поиска
+    search_query = learnings[:150]
+
+    try:
+        result = subprocess.run(
+            [HINDSIGHT_EMBED, "memory", "recall", BANK_ID, search_query,
+             "-b", "low", "--max-tokens", "1000", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            return False  # При ошибке — не блокируем сохранение
+
+        data = json.loads(result.stdout)
+        existing_facts = data.get("results", [])
+
+        # Проверяем схожесть с каждым найденным фактом
+        for fact in existing_facts[:5]:  # Проверяем топ-5
+            fact_text = fact.get("text", "")
+            similarity = jaccard_similarity(learnings, fact_text)
+            if similarity >= DEDUP_SIMILARITY_THRESHOLD:
+                return True  # Найден дубликат
+
+        return False
+    except Exception:
+        return False  # При ошибке — не блокируем сохранение
 
 
 def extract_learnings_with_reflect(content: str, cwd: str) -> str | None:
@@ -192,7 +248,9 @@ def main():
         learnings = extract_learnings_with_reflect(combined, cwd)
 
         if learnings:
-            retain_learnings(learnings, cwd)
+            # Проверяем на дубликаты перед сохранением
+            if not check_for_duplicates(learnings):
+                retain_learnings(learnings, cwd)
 
     except Exception:
         # Graceful degradation: любая ошибка = тихий exit
