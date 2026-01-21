@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 # hindsight-user-prompt.sh
 # Умный recall по контексту задачи пользователя
 #
@@ -12,6 +12,24 @@
 # Никогда не блокируем Claude — любая ошибка = тихий exit
 trap 'exit 0' ERR SIGTERM SIGINT
 
+# === LOGGING ===
+LOG_FILE="${HOME}/.hindsight/hooks.log"
+LOG_LEVEL="${HINDSIGHT_HOOKS_LOG_LEVEL:-INFO}"
+HOOK_NAME="user-prompt"
+
+log() {
+    local level="$1"
+    local message="$2"
+    # Уровни: DEBUG=0, INFO=1, WARN=2, ERROR=3
+    local -A levels=([DEBUG]=0 [INFO]=1 [WARN]=2 [ERROR]=3)
+    local msg_level="${levels[$level]:-1}"
+    local cfg_level="${levels[$LOG_LEVEL]:-1}"
+
+    if [[ $msg_level -ge $cfg_level ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] [$HOOK_NAME] $message" >> "$LOG_FILE" 2>/dev/null || true
+    fi
+}
+
 INPUT=$(cat) || exit 0
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 
@@ -24,12 +42,17 @@ CACHE_TTL_SECONDS=45  # Время жизни кеша
 # Используем локальный hindsight-embed из проекта
 HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-/Users/andreymiroshkin/hindsight-dev/patched/.venv/bin/hindsight-embed}"
 
-# Директория кеша
+# Директория кеша и логов
 CACHE_DIR="${HOME}/.hindsight/cache"
-mkdir -p "$CACHE_DIR" 2>/dev/null || true
+mkdir -p "$CACHE_DIR" "$(dirname "$LOG_FILE")" 2>/dev/null || true
+
+log "DEBUG" "Started with prompt length=${#PROMPT}"
 
 # Проверяем что hindsight-embed доступен
-[[ ! -x "$HINDSIGHT_EMBED" ]] && exit 0
+if [[ ! -x "$HINDSIGHT_EMBED" ]]; then
+    log "WARN" "hindsight-embed not found at $HINDSIGHT_EMBED"
+    exit 0
+fi
 
 # Пропускаем пустые промпты
 [[ -z "$PROMPT" ]] && exit 0
@@ -67,6 +90,7 @@ if [[ -f "$CACHE_FILE" ]]; then
         # Кеш валиден — используем его
         FACTS=$(cat "$CACHE_FILE" 2>/dev/null)
         if [[ -n "$FACTS" ]]; then
+            log "INFO" "Cache HIT (age=${FILE_AGE}s)"
             # Формируем компактный контекст
             CONTEXT="## Relevant Hindsight Memory\n"
             while IFS= read -r fact; do
@@ -84,6 +108,8 @@ if [[ -f "$CACHE_FILE" ]]; then
     fi
 fi
 
+log "DEBUG" "Cache MISS, calling recall API"
+
 # Формируем запрос для recall — используем сам prompt как query
 # hindsight сам извлечёт ключевые слова через query analyzer
 RESULT=$($HINDSIGHT_EMBED memory recall "$BANK_ID" "$PROMPT" \
@@ -94,6 +120,10 @@ FACTS=$(echo "$RESULT" | jq -r '.results[]?.text' 2>/dev/null | cut -d'|' -f1 | 
 
 # Сохраняем в кеш
 echo "$FACTS" > "$CACHE_FILE" 2>/dev/null || true
+
+# Считаем количество фактов
+FACTS_COUNT=$(echo "$FACTS" | grep -c . 2>/dev/null || echo 0)
+log "INFO" "Recall completed: ${FACTS_COUNT} facts found"
 
 # Если нашли релевантные факты — возвращаем как контекст
 if [[ -n "$FACTS" ]]; then

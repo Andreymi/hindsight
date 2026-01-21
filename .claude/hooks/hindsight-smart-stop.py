@@ -16,11 +16,13 @@ hindsight-smart-stop.py
 """
 
 import json
+import logging
 import os
 import re
 import signal
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # === GRACEFUL DEGRADATION ===
@@ -30,6 +32,33 @@ def graceful_exit(signum=None, frame=None):
 
 signal.signal(signal.SIGTERM, graceful_exit)
 signal.signal(signal.SIGINT, graceful_exit)
+
+# === LOGGING ===
+LOG_FILE = Path.home() / ".hindsight" / "hooks.log"
+LOG_LEVEL = os.environ.get("HINDSIGHT_HOOKS_LOG_LEVEL", "INFO")
+HOOK_NAME = "smart-stop"
+
+# Создаём директорию для логов
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+
+class HookFormatter(logging.Formatter):
+    def format(self, record):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"{timestamp} [{record.levelname}] [{HOOK_NAME}] {record.getMessage()}"
+
+
+# Настраиваем логгер
+logger = logging.getLogger(HOOK_NAME)
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+
+# Файловый handler
+try:
+    fh = logging.FileHandler(LOG_FILE)
+    fh.setFormatter(HookFormatter())
+    logger.addHandler(fh)
+except Exception:
+    pass  # Graceful: если не можем логировать — продолжаем без логов
 
 # Конфигурация
 BANK_ID = os.environ.get("HINDSIGHT_BANK_ID", "hindsight-dev")
@@ -47,7 +76,10 @@ HINDSIGHT_EMBED = os.environ.get(
 def check_hindsight_available() -> bool:
     """Проверяем что hindsight-embed доступен."""
     path = Path(HINDSIGHT_EMBED)
-    return path.exists() and os.access(path, os.X_OK)
+    available = path.exists() and os.access(path, os.X_OK)
+    if not available:
+        logger.warning(f"hindsight-embed not found at {HINDSIGHT_EMBED}")
+    return available
 
 # Паттерны значимого контента (для быстрой проверки без LLM)
 SIGNIFICANT_PATTERNS = [
@@ -150,10 +182,13 @@ def check_for_duplicates(learnings: str) -> bool:
             fact_text = fact.get("text", "")
             similarity = jaccard_similarity(learnings, fact_text)
             if similarity >= DEDUP_SIMILARITY_THRESHOLD:
+                logger.info(f"Duplicate found (similarity={similarity:.2f})")
                 return True  # Найден дубликат
 
+        logger.debug(f"No duplicates found among {len(existing_facts)} facts")
         return False
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Dedup check failed: {e}")
         return False  # При ошибке — не блокируем сохранение
 
 
@@ -208,12 +243,15 @@ def retain_learnings(learnings: str, cwd: str):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-    except Exception:
-        pass
+        logger.info(f"Retained learnings for project {project_name} ({len(learnings)} chars)")
+    except Exception as e:
+        logger.error(f"Failed to retain learnings: {e}")
 
 
 def main():
     try:
+        logger.debug("Started")
+
         # Проверяем доступность hindsight-embed
         if not check_hindsight_available():
             sys.exit(0)
@@ -222,19 +260,23 @@ def main():
 
         # КРИТИЧНО: предотвращаем infinite loop
         if input_data.get("stop_hook_active"):
+            logger.debug("Skipped: stop_hook_active=true")
             sys.exit(0)
 
         transcript_path = input_data.get("transcript_path", "")
         cwd = input_data.get("cwd", "")
 
         if not transcript_path or not Path(transcript_path).exists():
+            logger.debug("Skipped: no transcript")
             sys.exit(0)
 
         # Извлекаем сообщения assistant
         messages = extract_assistant_messages(transcript_path)
+        logger.debug(f"Extracted {len(messages)} assistant messages")
 
         # Проверяем минимальное количество
         if len(messages) < MIN_SESSION_TURNS:
+            logger.debug(f"Skipped: only {len(messages)} turns (min={MIN_SESSION_TURNS})")
             sys.exit(0)
 
         # Объединяем для анализа
@@ -242,7 +284,10 @@ def main():
 
         # Быстрая проверка на значимый контент
         if not has_significant_content(combined):
+            logger.debug("Skipped: no significant content")
             sys.exit(0)
+
+        logger.info("Extracting learnings via reflect...")
 
         # Извлекаем learnings через reflect
         learnings = extract_learnings_with_reflect(combined, cwd)
@@ -251,10 +296,14 @@ def main():
             # Проверяем на дубликаты перед сохранением
             if not check_for_duplicates(learnings):
                 retain_learnings(learnings, cwd)
+            else:
+                logger.info("Skipped: duplicate learnings")
+        else:
+            logger.debug("No learnings extracted")
 
-    except Exception:
+    except Exception as e:
         # Graceful degradation: любая ошибка = тихий exit
-        pass
+        logger.error(f"Unexpected error: {e}")
 
     sys.exit(0)
 
