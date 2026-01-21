@@ -19,9 +19,14 @@ PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 BANK_ID="${HINDSIGHT_BANK_ID:-hindsight-dev}"
 MIN_PROMPT_LENGTH=30
 MAX_FACTS=5
+CACHE_TTL_SECONDS=45  # Время жизни кеша
 
 # Используем локальный hindsight-embed из проекта
 HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-/Users/andreymiroshkin/hindsight-dev/patched/.venv/bin/hindsight-embed}"
+
+# Директория кеша
+CACHE_DIR="${HOME}/.hindsight/cache"
+mkdir -p "$CACHE_DIR" 2>/dev/null || true
 
 # Проверяем что hindsight-embed доступен
 [[ ! -x "$HINDSIGHT_EMBED" ]] && exit 0
@@ -44,6 +49,41 @@ if echo "$PROMPT_LOWER" | grep -qE "^(y|n|1|2|3|4|q|quit|exit|help|\?)$"; then
     exit 0
 fi
 
+# === THROTTLING ===
+# Вычисляем hash от первых 100 символов для ключа кеша
+PROMPT_KEY=$(echo "${PROMPT:0:100}" | md5sum 2>/dev/null | cut -d' ' -f1 || echo "${PROMPT:0:100}" | md5 2>/dev/null)
+CACHE_FILE="$CACHE_DIR/prompt-${PROMPT_KEY:0:16}.cache"
+
+# Проверяем кеш
+if [[ -f "$CACHE_FILE" ]]; then
+    # Проверяем возраст файла
+    if [[ "$(uname)" == "Darwin" ]]; then
+        FILE_AGE=$(( $(date +%s) - $(stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0) ))
+    else
+        FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0) ))
+    fi
+
+    if [[ $FILE_AGE -lt $CACHE_TTL_SECONDS ]]; then
+        # Кеш валиден — используем его
+        FACTS=$(cat "$CACHE_FILE" 2>/dev/null)
+        if [[ -n "$FACTS" ]]; then
+            # Формируем компактный контекст
+            CONTEXT="## Relevant Hindsight Memory\n"
+            while IFS= read -r fact; do
+                [[ -n "$fact" ]] && CONTEXT="${CONTEXT}• ${fact}\n"
+            done <<< "$FACTS"
+
+            jq -n --arg ctx "$CONTEXT" '{
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": $ctx
+                }
+            }'
+            exit 0
+        fi
+    fi
+fi
+
 # Формируем запрос для recall — используем сам prompt как query
 # hindsight сам извлечёт ключевые слова через query analyzer
 RESULT=$($HINDSIGHT_EMBED memory recall "$BANK_ID" "$PROMPT" \
@@ -51,6 +91,9 @@ RESULT=$($HINDSIGHT_EMBED memory recall "$BANK_ID" "$PROMPT" \
 
 # Извлекаем факты
 FACTS=$(echo "$RESULT" | jq -r '.results[]?.text' 2>/dev/null | cut -d'|' -f1 | head -$MAX_FACTS)
+
+# Сохраняем в кеш
+echo "$FACTS" > "$CACHE_FILE" 2>/dev/null || true
 
 # Если нашли релевантные факты — возвращаем как контекст
 if [[ -n "$FACTS" ]]; then
