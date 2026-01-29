@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -70,20 +71,22 @@ MIN_SESSION_TURNS = 4  # Минимум сообщений для анализа
 MAX_TRANSCRIPT_CHARS = 15000  # Лимит для анализа
 DEDUP_SIMILARITY_THRESHOLD = 0.35  # Порог схожести для дедупликации (снижен из-за метаданных в фактах)
 
-# Путь к локальному hindsight-embed
-HINDSIGHT_EMBED = os.environ.get(
-    "HINDSIGHT_EMBED_PATH",
-    "/Users/andreymiroshkin/hindsight-dev/patched/.venv/bin/hindsight-embed"
-)
+# hindsight-embed должен быть в PATH (глобально или через ~/.zshrc)
+HINDSIGHT_EMBED = os.environ.get("HINDSIGHT_EMBED_PATH", "hindsight-embed")
 
 
 def check_hindsight_available() -> bool:
-    """Проверяем что hindsight-embed доступен."""
+    """Проверяем что hindsight-embed доступен (в PATH или по полному пути)."""
+    # shutil.which() находит команду в PATH
+    resolved = shutil.which(HINDSIGHT_EMBED)
+    if resolved:
+        return True
+    # Fallback: проверяем как абсолютный путь
     path = Path(HINDSIGHT_EMBED)
-    available = path.exists() and os.access(path, os.X_OK)
-    if not available:
-        logger.warning(f"hindsight-embed not found at {HINDSIGHT_EMBED}")
-    return available
+    if path.exists() and os.access(path, os.X_OK):
+        return True
+    logger.warning(f"hindsight-embed not found: {HINDSIGHT_EMBED}")
+    return False
 
 # Паттерны значимого контента (для быстрой проверки без LLM)
 SIGNIFICANT_PATTERNS = [
