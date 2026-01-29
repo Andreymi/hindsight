@@ -46,8 +46,8 @@ MIN_PROMPT_LENGTH=30
 MAX_FACTS=5
 CACHE_TTL_SECONDS=45  # Время жизни кеша
 
-# Используем локальный hindsight-embed из проекта
-HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-/Users/andreymiroshkin/hindsight-dev/patched/.venv/bin/hindsight-embed}"
+# hindsight-embed должен быть в PATH (глобально или через ~/.zshrc)
+HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-hindsight-embed}"
 
 # Директория кеша и логов
 CACHE_DIR="${HOME}/.hindsight/cache"

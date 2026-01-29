@@ -45,12 +45,12 @@ log "DEBUG" "Started: source=$SOURCE cwd=$CWD"
 # Конфигурация
 BANK_ID="${HINDSIGHT_BANK_ID:-hindsight-dev}"
 
-# Используем локальный hindsight-embed из проекта
-HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-/Users/andreymiroshkin/hindsight-dev/patched/.venv/bin/hindsight-embed}"
+# hindsight-embed должен быть в PATH (глобально или через ~/.zshrc)
+HINDSIGHT_EMBED="${HINDSIGHT_EMBED_PATH:-hindsight-embed}"
 
 # Проверяем что hindsight-embed доступен
-if [[ ! -x "$HINDSIGHT_EMBED" ]]; then
-    log "WARN" "hindsight-embed not found at $HINDSIGHT_EMBED"
+if ! command -v "$HINDSIGHT_EMBED" &>/dev/null; then
+    log "WARN" "hindsight-embed not found in PATH"
     exit 0
 fi
 
@@ -58,9 +58,9 @@ fi
 PROJECT_NAME=$(basename "$CWD" 2>/dev/null || echo "unknown")
 log "INFO" "Loading context for project: $PROJECT_NAME"
 
-# Recall релевантного контекста
+# Recall релевантного контекста (на русском для лучшего поиска)
 RESULT=$($HINDSIGHT_EMBED memory recall "$BANK_ID" \
-    "project $PROJECT_NAME context preferences architecture decisions" \
+    "проект $PROJECT_NAME контекст предпочтения архитектура решения процедуры" \
     -b low --max-tokens 1500 -o json 2>/dev/null) || exit 0
 
 # Извлекаем факты (API возвращает .results[], не .facts[])
