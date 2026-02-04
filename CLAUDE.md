@@ -55,6 +55,52 @@ cd hindsight-control-plane && npm run dev
 ./scripts/generate-clients.sh
 ```
 
+### Rust CLI (hindsight-cli)
+```bash
+# Build and install from source (required after changes to hindsight-cli/src/)
+~/.cargo/bin/cargo install --path hindsight-cli
+cp ~/.cargo/bin/hindsight ~/.local/bin/hindsight
+
+# Verify version
+hindsight --version
+```
+
+**Important notes:**
+- The `hindsight` binary in `~/.local/bin/` is what `hindsight-embed` invokes via subprocess
+- Upstream installs it via `curl -fsSL https://hindsight.vectorize.io/get-cli | bash` — this overwrites with upstream's prebuilt binary (without our patches)
+- After upstream CLI updates or source changes in `hindsight-cli/`, always rebuild from source using the commands above
+- Cargo is at `~/.cargo/bin/cargo` (not in default shell PATH in Claude Code)
+
+### Embed CLI (hindsight-embed)
+```bash
+# Run tests
+cd hindsight-embed && uv run pytest tests/
+
+# Configuration (interactive)
+hindsight-embed configure
+
+# Profile management
+hindsight-embed profile list
+hindsight-embed profile show
+
+# Daemon management
+hindsight-embed daemon start
+hindsight-embed daemon status
+hindsight-embed daemon stop
+
+# Memory operations (auto-starts daemon if not running)
+hindsight-embed memory retain <bank_id> "content"
+hindsight-embed memory recall <bank_id> "query"
+```
+
+**Important notes:**
+- `hindsight-embed` is a Python wrapper that manages daemon lifecycle and forwards commands to `hindsight` (Rust CLI)
+- Config stored in `~/.hindsight/embed` (default profile) and `~/.hindsight/profiles/<name>.env` (named profiles)
+- Daemon auto-starts on first operation; idle timeout (default 600s) stops it automatically
+- `daemon status` returns exit code 1 when daemon is not running — this is by design, not an error
+- Supports OpenAI-compatible providers via `hindsight-embed configure` (choose "OpenAI-compatible")
+- On macOS, CPU mode is default for embeddings/reranker; set `HINDSIGHT_EMBED_USE_GPU=1` to enable MPS/Metal
+
 ### Benchmarks
 ```bash
 # Accuracy benchmarks
