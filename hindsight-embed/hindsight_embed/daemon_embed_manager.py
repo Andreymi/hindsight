@@ -89,13 +89,25 @@ class DaemonEmbedManager(EmbedManager):
             return False
 
     def _find_api_command(self) -> list[str]:
-        """Find the command to run hindsight-api."""
-        # Check if we're in development mode
+        """Find the command to run hindsight-api.
+
+        Priority:
+        1. PATH lookup (includes .venv/bin, avoids slow uv run)
+        2. Development mode (uv run with local project)
+        3. Fallback (uvx from PyPI)
+        """
+        import shutil
+
+        # 1. Check PATH first (fast, no uv overhead)
+        if shutil.which("hindsight-api"):
+            return ["hindsight-api"]
+
+        # 2. Check if we're in development mode (local hindsight-api available)
         dev_api_path = Path(__file__).parent.parent.parent / "hindsight-api"
         if dev_api_path.exists() and (dev_api_path / "pyproject.toml").exists():
             return ["uv", "run", "--project", str(dev_api_path), "hindsight-api"]
 
-        # Fall back to uvx for installed version
+        # 3. Fall back to uvx for installed version
         from . import __version__
 
         api_version = os.getenv("HINDSIGHT_EMBED_API_VERSION", __version__)
@@ -152,13 +164,16 @@ class DaemonEmbedManager(EmbedManager):
             env["HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT"] = str(DEFAULT_DAEMON_IDLE_TIMEOUT)
 
         # On macOS, force CPU for embeddings/reranker to avoid MPS issues
+        # Allow GPU via HINDSIGHT_EMBED_USE_GPU=1 (default: 0, CPU mode for stability)
         import platform
 
         if platform.system() == "Darwin":
-            if "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU" not in env:
-                env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
-            if "HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU" not in env:
-                env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
+            use_gpu = os.getenv("HINDSIGHT_EMBED_USE_GPU", "0") == "1"
+            if not use_gpu:
+                if "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU" not in env:
+                    env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
+                if "HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU" not in env:
+                    env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
 
         # Get idle timeout from env
         idle_timeout = int(env.get("HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT", str(DEFAULT_DAEMON_IDLE_TIMEOUT)))
