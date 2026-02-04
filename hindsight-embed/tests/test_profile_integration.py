@@ -291,9 +291,9 @@ class TestProfileIntegration:
         env = {
             **os.environ,
             "HOME": str(temp_home),
-            "HINDSIGHT_EMBED_LLM_PROVIDER": "openai",
-            "HINDSIGHT_EMBED_LLM_API_KEY": "sk-test",
-            "HINDSIGHT_EMBED_LLM_MODEL": "gpt-4o-mini",
+            "HINDSIGHT_API_LLM_PROVIDER": "openai",
+            "HINDSIGHT_API_LLM_API_KEY": "sk-test",
+            "HINDSIGHT_API_LLM_MODEL": "gpt-4o-mini",
         }
 
         result = subprocess.run(
