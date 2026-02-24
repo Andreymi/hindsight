@@ -27,9 +27,10 @@ export HINDSIGHT_API_TENANT_EXTENSION="hindsight_api.extensions.builtin.sup_tena
 export HINDSIGHT_API_TENANT_SERVER_SECRET="${HINDSIGHT_API_TENANT_SERVER_SECRET:-dev-secret}"
 
 # Default port 8890 to avoid conflict with embed daemon on 8888
-PORT="${1:-8890}"
-if [ "$1" = "--port" ] && [ -n "${2:-}" ]; then
+PORT="8890"
+if [ "${1:-}" = "--port" ] && [ -n "${2:-}" ]; then
     PORT="$2"
+    shift 2
 fi
 
 echo "Starting Hindsight API for SUP on port $PORT"
