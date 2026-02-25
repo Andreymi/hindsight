@@ -424,14 +424,32 @@ class WorkerPoller:
                 batch_count = await self._recover_batch_operations(schema)
                 total_count += batch_count
 
-                # Then reset normal worker tasks
+                # Then reset normal worker tasks (with retry limit)
+                max_retries = 3
+
+                # Fail tasks that exceeded retry limit
+                await self._pool.execute(
+                    f"""
+                    UPDATE {table}
+                    SET status = 'failed', error_message = 'Max retries exceeded after worker crash recovery', updated_at = now()
+                    WHERE status = 'processing' AND worker_id = $1 AND result_metadata->>'batch_id' IS NULL
+                      AND retry_count >= $2
+                    """,
+                    self._worker_id,
+                    max_retries,
+                )
+
+                # Reset tasks that still have retries left
                 result = await self._pool.execute(
                     f"""
                     UPDATE {table}
-                    SET status = 'pending', worker_id = NULL, claimed_at = NULL, updated_at = now()
+                    SET status = 'pending', worker_id = NULL, claimed_at = NULL, updated_at = now(),
+                        retry_count = retry_count + 1
                     WHERE status = 'processing' AND worker_id = $1 AND result_metadata->>'batch_id' IS NULL
+                      AND retry_count < $2
                     """,
                     self._worker_id,
+                    max_retries,
                 )
 
                 # Parse "UPDATE N" to get count
