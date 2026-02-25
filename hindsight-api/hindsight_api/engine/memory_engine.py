@@ -6218,12 +6218,15 @@ class MemoryEngine(MemoryEngineInterface):
                 db_status = row["status"]
                 api_status = "pending" if db_status in ("pending", "processing") else db_status
 
+                # Extract items_count and document_id from result_metadata (populated on completion)
+                result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
+
                 operation_list.append(
                     {
                         "id": str(row["operation_id"]),
                         "task_type": row["operation_type"],
-                        "items_count": 0,
-                        "document_id": None,
+                        "items_count": result_metadata.get("items_count", 0),
+                        "document_id": result_metadata.get("document_id"),
                         "created_at": row["created_at"].isoformat(),
                         "status": api_status,
                         "error_message": row["error_message"],
