@@ -28,7 +28,8 @@ from .daemon import (
     DEFAULT_DAEMON_PORT,
     DEFAULT_IDLE_TIMEOUT,
     IdleTimeoutMiddleware,
-    daemonize,
+    setup_daemon_logging,
+    spawn_daemon_subprocess,
 )
 from .extensions import DefaultExtensionContext, OperationValidatorExtension, TenantExtension, load_extension
 
@@ -131,21 +132,40 @@ def main():
         help=f"Idle timeout in seconds before auto-exit in daemon mode (default: {DEFAULT_IDLE_TIMEOUT})",
     )
 
+    # Internal flag for daemon child process (not shown in help)
+    # When --daemon is used, we spawn a subprocess with --_daemon-child
+    # This avoids fork() which breaks MPS on macOS
+    parser.add_argument(
+        "--_daemon-child",
+        action="store_true",
+        help=argparse.SUPPRESS,  # Hidden from --help
+    )
+
     args = parser.parse_args()
 
     # Daemon mode handling
+    # We use subprocess instead of fork() to avoid breaking MPS on macOS
     if args.daemon:
         # Use port from args (may be custom for profiles)
         if args.port == config.port:  # No custom port specified
             args.port = DEFAULT_DAEMON_PORT
         args.host = "127.0.0.1"  # Only bind to localhost for security
 
-        # Fork into background
+        # Spawn daemon as subprocess (not fork!) to preserve MPS/Metal GPU support
         # No lockfile needed - port binding prevents duplicate daemons
-        daemonize()
+        pid = spawn_daemon_subprocess(idle_timeout=args.idle_timeout)
+        print(f"Daemon started with PID {pid}")
+        sys.exit(0)  # Parent exits, daemon continues in subprocess
+
+    # Daemon child mode: set up logging, run server directly (no fork)
+    if args._daemon_child:
+        if args.port == config.port:
+            args.port = DEFAULT_DAEMON_PORT
+        args.host = "127.0.0.1"
+        setup_daemon_logging()
 
     # Print banner (not in daemon mode)
-    if not args.daemon:
+    if not args._daemon_child:
         print()
         print_banner()
 
@@ -304,7 +324,7 @@ def main():
             otel_deployment_environment=config.otel_deployment_environment,
         )
     config.configure_logging()
-    if not args.daemon:
+    if not args._daemon_child:
         config.log_config()
 
     # Register cleanup handlers
@@ -353,7 +373,7 @@ def main():
 
     # Wrap with idle timeout middleware in daemon mode
     idle_middleware = None
-    if args.daemon:
+    if args._daemon_child:
         idle_middleware = IdleTimeoutMiddleware(app, idle_timeout=args.idle_timeout)
         app = idle_middleware
 
@@ -395,7 +415,7 @@ def main():
         uvicorn_config["ssl_certfile"] = args.ssl_certfile
 
     # Print startup info (not in daemon mode)
-    if not args.daemon:
+    if not args._daemon_child:
         from .banner import print_startup_info
 
         print_startup_info(

@@ -216,6 +216,7 @@ class WorkerPoller:
                 # Strategy: Claim non-consolidation tasks first, then consolidation up to limit
 
                 # 1. Claim non-consolidation tasks (up to limit)
+                # Filter out tasks that exceeded max retries (poison pill protection)
                 non_consolidation_rows = await conn.fetch(
                     f"""
                     SELECT operation_id, task_payload
@@ -223,17 +224,20 @@ class WorkerPoller:
                     WHERE status = 'pending'
                       AND task_payload IS NOT NULL
                       AND operation_type != 'consolidation'
+                      AND retry_count < $2
                     ORDER BY created_at
                     LIMIT $1
                     FOR UPDATE SKIP LOCKED
                     """,
                     limit,
+                    self._max_retries,
                 )
 
                 claimed_count = len(non_consolidation_rows)
                 remaining_limit = limit - claimed_count
 
                 # 2. Claim consolidation tasks (up to consolidation_limit and remaining_limit)
+                # Filter out tasks that exceeded max retries (poison pill protection)
                 consolidation_rows = []
                 if consolidation_limit > 0 and remaining_limit > 0:
                     consolidation_rows = await conn.fetch(
@@ -243,6 +247,7 @@ class WorkerPoller:
                         WHERE status = 'pending'
                           AND task_payload IS NOT NULL
                           AND operation_type = 'consolidation'
+                          AND retry_count < $2
                           AND NOT EXISTS (
                               SELECT 1 FROM {table} AS processing
                               WHERE processing.bank_id = pending.bank_id
@@ -254,6 +259,7 @@ class WorkerPoller:
                         FOR UPDATE SKIP LOCKED
                         """,
                         min(consolidation_limit, remaining_limit),
+                        self._max_retries,
                     )
 
                 all_rows = non_consolidation_rows + consolidation_rows

@@ -30,7 +30,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Constants
 DAEMON_STARTUP_TIMEOUT = 180  # seconds
-DEFAULT_DAEMON_IDLE_TIMEOUT = 300  # 5 minutes
+DEFAULT_DAEMON_IDLE_TIMEOUT = 1800  # 30 minutes
 
 
 class DaemonEmbedManager(EmbedManager):
@@ -163,17 +163,10 @@ class DaemonEmbedManager(EmbedManager):
         if "HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT" not in env:
             env["HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT"] = str(DEFAULT_DAEMON_IDLE_TIMEOUT)
 
-        # On macOS, force CPU for embeddings/reranker to avoid MPS issues
-        # Allow GPU via HINDSIGHT_EMBED_USE_GPU=1 (default: 0, CPU mode for stability)
-        import platform
-
-        if platform.system() == "Darwin":
-            use_gpu = os.getenv("HINDSIGHT_EMBED_USE_GPU", "0") == "1"
-            if not use_gpu:
-                if "HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU" not in env:
-                    env["HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU"] = "1"
-                if "HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU" not in env:
-                    env["HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU"] = "1"
+        # MPS/Metal GPU is supported via subprocess-based daemon (no fork).
+        # On macOS, GPU is used by default. Users can force CPU mode with:
+        #   HINDSIGHT_API_EMBEDDINGS_LOCAL_FORCE_CPU=1
+        #   HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU=1
 
         # Get idle timeout from env
         idle_timeout = int(env.get("HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT", str(DEFAULT_DAEMON_IDLE_TIMEOUT)))
@@ -182,9 +175,12 @@ class DaemonEmbedManager(EmbedManager):
         daemon_log.parent.mkdir(parents=True, exist_ok=True)
         env["HINDSIGHT_API_DAEMON_LOG"] = str(daemon_log)
 
-        # Build command
+        # Build command: use --_daemon-child (not --daemon) since we handle
+        # process detaching ourselves via subprocess.Popen(start_new_session=True).
+        # This avoids a redundant double-fork inside the child process and
+        # preserves MPS/Metal GPU support on macOS.
         cmd = self._find_api_command() + [
-            "--daemon",
+            "--_daemon-child",
             "--idle-timeout",
             str(idle_timeout),
             "--port",
