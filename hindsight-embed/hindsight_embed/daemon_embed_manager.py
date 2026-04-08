@@ -90,13 +90,29 @@ class DaemonEmbedManager(EmbedManager):
             return False
 
     def _find_api_command(self) -> list[str]:
-        """Find the command to run hindsight-api."""
-        # Check if we're in development mode
+        """Find the command to run hindsight-api.
+
+        When running from a dev repo (editable install), ALWAYS use the local
+        hindsight-api-slim. Never fall back to uvx — that risks pulling a
+        different version from PyPI and running unpatched code / migrations.
+        """
+        # Check if we're in development mode (editable install from monorepo)
         dev_api_path = Path(__file__).parent.parent.parent / "hindsight-api-slim"
         if dev_api_path.exists() and (dev_api_path / "pyproject.toml").exists():
             return ["uv", "run", "--project", str(dev_api_path), "hindsight-api"]
 
-        # Fall back to uvx for installed version
+        # Guard: if this is an editable install but the dev path is missing,
+        # something is wrong — don't silently fall back to uvx
+        egg_link = Path(__file__).parent.parent / "hindsight_embed.egg-info"
+        if egg_link.exists() or any(Path(__file__).parent.parent.glob("__editable__*")):
+            raise RuntimeError(
+                f"hindsight-embed is installed as editable but hindsight-api-slim "
+                f"not found at {dev_api_path}. Refusing to fall back to uvx — "
+                f"this would run unpatched code from PyPI. "
+                f"Fix: reinstall editable from the dev repo, or use a non-editable install."
+            )
+
+        # Non-editable install: use uvx with pinned version
         from . import __version__
 
         api_version = os.getenv("HINDSIGHT_EMBED_API_VERSION", __version__)
