@@ -1,4 +1,4 @@
-# Hindsight v0.4 — Feature Patterns Guide
+# Hindsight — Feature Patterns Guide
 
 Экспериментально проверенные паттерны использования ключевых фич Hindsight.
 - v0.4.14: эксперименты 2026-03-03 на локальном (pg0) и Supabase (sup) профилях
@@ -8,6 +8,7 @@
 - v0.4.20: reflect wall-clock timeout, fact_types/exclude_mental_models filters
 - v0.4.21: delta retain (content hashing), audit logging, LiteLLM provider, max_observations_per_scope
 - v0.4.22: mental model tag filtering (trigger.tags_match/tag_groups), document metadata API, custom LLM params
+- v0.5.0: bank templates (import/export), retain append mode, mental model detail levels, llamacpp local LLM, graph retrieval performance
 
 ---
 
@@ -876,4 +877,146 @@ curl -X PATCH "http://localhost:8888/v1/default/banks/{bank_id}/config" \
 # Reflect с structured output (API-only)
 curl -X POST ".../banks/{bank_id}/reflect" \
   -d '{"query": "...", "response_schema": {...}}'
+
+# Bank template export/import (v0.5.0)
+curl -s ".../banks/{bank_id}/export" | jq .
+curl -X POST ".../banks/{bank_id}/import" -d @template.json
+
+# Mental models с detail level (v0.5.0)
+curl -s ".../banks/{bank_id}/mental-models?detail=metadata"
+
+# Retain с append mode (v0.5.0)
+curl -X POST ".../banks/{bank_id}/memories/retain" \
+  -d '{"items": [{"content": "new text", "document_id": "doc1"}], "update_mode": "append"}'
 ```
+
+---
+
+## 11. Фичи v0.5.0
+
+### 11.1. Bank Templates — версионирование конфигурации банков
+
+**Что это:** Export/import полной конфигурации банка (config overrides, mental models, directives) как JSON manifest.
+
+**Паттерны:**
+
+| # | Паттерн | Описание |
+|---|---------|----------|
+| 1 | Template as Code | Экспорт → коммит в git → import на другом instance. Версионирование конфигов |
+| 2 | Bank provisioning | Шаблон для нового клиента: disposition + mental models + directives за 1 запрос |
+| 3 | Dev/prod parity | Один template → import на dev и prod, гарантия идентичной конфигурации |
+| 4 | Backup/restore | Export перед деструктивными операциями, import для восстановления |
+
+**API:**
+```bash
+# Export
+curl -s "http://localhost:8888/v1/default/banks/my-bank/export" > template.json
+
+# Import (создаёт bank если не существует)
+curl -X POST "http://localhost:8888/v1/default/banks/new-bank/import" \
+  -H "Content-Type: application/json" -d @template.json
+
+# Валидация
+curl -s "http://localhost:8888/v1/bank-template-schema" | jq .
+```
+
+**Template manifest format:**
+```json
+{
+  "config": { "retain_strategy": "default", "llm_model": "..." },
+  "mental_models": [
+    { "id": "uuid", "name": "Domain Knowledge", "content": "..." }
+  ],
+  "directives": [
+    { "text": "Always respond in Russian", "priority": 1 }
+  ]
+}
+```
+
+### 11.2. Retain Append Mode — инкрементальное дополнение документов
+
+**Что это:** `update_mode: "append"` конкатенирует новый контент к существующему документу, затем переобрабатывает весь документ. Delta retain автоматически пропускает старые chunks.
+
+**Когда использовать:**
+- Накопление сообщений чата в один документ
+- Добавление новых заметок к существующей теме
+- Логирование последовательных событий
+
+**API:**
+```bash
+# Первый retain — создаёт документ
+curl -X POST ".../banks/{id}/memories/retain" \
+  -d '{"items": [{"content": "msg 1", "document_id": "chat-123"}]}'
+
+# Второй retain — дополняет
+curl -X POST ".../banks/{id}/memories/retain" \
+  -d '{"items": [{"content": "msg 2", "document_id": "chat-123"}], "update_mode": "append"}'
+# Результат: документ содержит "msg 1\n\nmsg 2", но LLM обрабатывает только новый chunk
+```
+
+**Паттерн для чата:**
+- Один `document_id` = одна сессия чата
+- Каждое сообщение → `append` retain
+- Delta retain хеширует chunks → LLM не переобрабатывает старые сообщения
+- Consolidation агрегирует наблюдения из всех сообщений
+
+### 11.3. Mental Model Detail Levels — оптимизация payload
+
+**Что это:** Параметр `detail` на GET/LIST mental models endpoints для контроля объёма возвращаемых данных.
+
+| detail | Что включает | Размер | Когда |
+|--------|-------------|--------|-------|
+| `metadata` | id, name, created_at, updated_at | ~100 bytes | Boot flow, sidebar list |
+| `content` | + text content | ~2-10 KB | Preview, display |
+| `full` | + history, trigger config, tags | ~5-50 KB | Admin, edit mode |
+
+**API:**
+```bash
+# Быстрая загрузка списка (только имена)
+curl -s ".../banks/{id}/mental-models?detail=metadata"
+
+# Полные данные конкретной модели
+curl -s ".../banks/{id}/mental-models/{mm_id}?detail=full"
+```
+
+### 11.4. Новые LLM/Embeddings/Reranker провайдеры
+
+| Провайдер | Тип | Модель по умолчанию | Применение |
+|-----------|-----|---------------------|------------|
+| `llamacpp` | LLM | Gemma 4 E2B Q4_K_M (~3.5 GB) | Offline dev, zero-cost inference |
+| `openrouter` | LLM | qwen/qwen3.5-9b | Доступ к 100+ моделям через один API key |
+| `gemini` | Embeddings | gemini-embedding-001 (768d) | Google ecosystem |
+| `openrouter` | Embeddings | pplx-embed-v1-0.6b | OpenRouter unified key |
+| `google` | Reranker | semantic-ranker-default-004 | Cloud reranking |
+| `openrouter` | Reranker | cohere/rerank-v3.5 | OpenRouter unified key |
+
+**llamacpp для dev:** Первый запуск автоматически скачивает модель. Не нужны API ключи. Идеально для тестирования.
+```bash
+export HINDSIGHT_API_LLM_PROVIDER=llamacpp
+# Всё! При первом retain модель скачается и запустится
+```
+
+### 11.5. Graph Retrieval Performance — entity fanout cap
+
+**Что изменилось:**
+- BFS и MPFP graph retrieval стратегии **удалены** (были deprecated)
+- Остаётся только `link_expansion` — единственная graph retrieval стратегия
+- **Entity fanout cap:** `LINK_EXPANSION_PER_ENTITY_LIMIT=200` (default)
+  - На банках с 25K+ mentions per entity: **84% ускорение recall** (11s → 1.8s)
+  - Timeout: `LINK_EXPANSION_TIMEOUT=10.0` сек (предотвращает зависание)
+
+**Когда тюнить:**
+- Для высокочастотных entities (системные имена, общие термины) — уменьшить до 50-100
+- Для точных domains — увеличить до 500+
+
+### 11.6. Sync Retain (MCP) — синхронный retain без polling
+
+**Что это:** MCP tool `sync_retain` выполняет retain синхронно (без async operation + polling). Полезно для MCP-клиентов (Claude Code, Cursor) где polling неудобен.
+
+### 11.7. Clear Memories — сохранение bank profile
+
+**Что изменилось:** `DELETE /memories` теперь **не удаляет** bank profile (disposition, background, config). Раньше удалял весь банк. Параметр `delete_bank_profile=false` (default).
+
+### 11.8. Proof Count Boost — ранжирование по reliability
+
+**Что это:** Факты с большим количеством supporting evidence (proof_count) ранжируются выше при recall. ~5% boost на факты с 50+ proofs. Автоматически, без конфигурации.

@@ -269,8 +269,46 @@ User msg → streamText({ tools: hindsightTools }) → агент сам recall/
 | **Custom LLM params** | `EXTRA_BODY` для provider-specific settings | Полезно при self-hosted |
 | **MCP stateless HTTP** | POST-only mode для Claude Code | Dev tooling |
 
+### Новые API-возможности (v0.5.0)
+
+| Фича | Описание | Релевантность для sup |
+|------|----------|----------------------|
+| **Bank Templates** | Export/import конфига + mental models + directives как JSON manifest | ✅ Provisioning новых tenant банков |
+| **Retain `append` mode** | Дополнение документов без полной переработки | ✅ Инкрементальный чат, activity log |
+| **Mental Model `detail` levels** | `metadata`/`content`/`full` — контроль payload размера | ✅ Быстрый boot, sidebar |
+| **Clear memories ≠ delete bank** | DELETE /memories сохраняет bank profile | ✅ Reset без потери конфига |
+| **`llamacpp` LLM** | Полностью offline LLM (Gemma 4, ~3.5GB) | Dev-only (no API keys) |
+| **`openrouter` LLM/emb/reranker** | 100+ моделей через один API key | Альтернатива ollama cloud |
+| **Entity fanout cap** | 200 per-entity limit в graph expansion | ✅ 84% ускорение recall |
+| **`sync_retain` MCP tool** | Синхронный retain без polling | MCP-клиенты |
+| **Proof count boost** | Ранжирование по количеству supporting evidence | Автоматически, бесплатно |
+
+**Ключевые паттерны v0.5.0 для sup:**
+
+1. **Bank provisioning через templates:**
+   ```
+   # Создать template для tenant банка
+   POST /banks/template-bank/export → template.json
+   # Для каждого нового tenant:
+   POST /banks/tenant-{tenantId}/import ← template.json
+   ```
+   Один template определяет disposition, mental models, directives для всех tenant банков.
+
+2. **Append mode для chat sessions:**
+   ```
+   # Каждое сообщение → append к одному документу
+   POST /retain { items: [{content: msg, document_id: "chat-{sessionId}"}], update_mode: "append" }
+   ```
+   Delta retain пропускает старые chunks. Consolidation агрегирует наблюдения.
+
+3. **Lazy loading mental models в UI:**
+   ```
+   GET /mental-models?detail=metadata   → sidebar list (быстро)
+   GET /mental-models/{id}?detail=full  → при клике (полные данные)
+   ```
+
 ### Вопросы для решения перед стартом
-1. LLM провайдер (OpenAI / Anthropic / другой)
+1. LLM провайдер (OpenAI / Anthropic / OpenRouter / llamacpp для dev)
 2. Где жить чату (страница / floating widget / sidebar)
 3. Scope MVP (просто чат / с knowledge base)
 4. Hindsight API (sup profile / default pg0)
