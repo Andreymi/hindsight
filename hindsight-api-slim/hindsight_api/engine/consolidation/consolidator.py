@@ -81,13 +81,15 @@ class _CreateAction(BaseModel):
 
 
 class _UpdateAction(BaseModel):
-    text: str
+    text: str | None = None  # None = keep existing observation text (proof-only update)
     observation_id: str  # UUID of the existing observation to update
     source_fact_ids: list[str]  # memory UUIDs from the NEW FACTS list
 
     @field_validator("text", mode="before")
     @classmethod
-    def sanitize_text(cls, v: str) -> str:
+    def sanitize_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         return sanitize_llm_output(v) or ""
 
 
@@ -933,7 +935,7 @@ async def _execute_update_action(
     bank_id: str,
     source_memory_ids: list[uuid.UUID],
     observation_id: str,
-    new_text: str,
+    new_text: str | None,
     observations: list["MemoryFact"],
     source_fact_tags: list[str] | None = None,
     source_occurred_start: datetime | None = None,
@@ -960,6 +962,10 @@ async def _execute_update_action(
         )
         return
     source_memory_ids = live_source_memory_ids
+
+    # If LLM omitted text (proof-only update), keep existing observation text
+    if new_text is None:
+        new_text = model.text
 
     from ...config import get_config
 
@@ -1274,6 +1280,7 @@ async def _consolidate_batch_with_llm(
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": response_model,
                 "scope": "consolidation",
+                "max_completion_tokens": 16384,
             }
             if inner_max_retries is not None:
                 call_kwargs["max_retries"] = inner_max_retries
