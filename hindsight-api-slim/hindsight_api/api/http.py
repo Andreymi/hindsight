@@ -2793,15 +2793,15 @@ def _register_routes(app: FastAPI):
     # Create audit decorator bound to this app's audit logger
     audited = _make_audited_http(lambda: getattr(app.state, "audit_logger", None))
 
-    def get_request_context(authorization: str | None = Header(default=None)) -> RequestContext:
+    def get_request_context(request: Request, authorization: str | None = Header(default=None)) -> RequestContext:
         """
-        Extract request context from Authorization header.
+        Extract request context from Authorization header and request headers.
 
         Supports:
         - Bearer token: "Bearer <api_key>"
         - Direct API key: "<api_key>"
 
-        Returns RequestContext with extracted API key (may be None if no auth header).
+        Returns RequestContext with extracted API key and headers for tenant extensions.
         """
         api_key = None
         if authorization:
@@ -2809,7 +2809,7 @@ def _register_routes(app: FastAPI):
                 api_key = authorization[7:].strip()
             else:
                 api_key = authorization.strip()
-        return RequestContext(api_key=api_key)
+        return RequestContext(api_key=api_key, headers=dict(request.headers))
 
     # Global exception handler for authentication errors
     @app.exception_handler(AuthenticationError)

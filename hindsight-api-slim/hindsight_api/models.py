@@ -24,6 +24,7 @@ class RequestContext:
     mcp_authenticated: bool = False  # True when MCP transport auth already validated (skips tenant re-auth)
     user_initiated: bool = False  # True for async operations that originated from a user request
     allowed_bank_ids: list[str] | None = None  # None = unrestricted (all banks)
+    headers: dict[str, str] | None = None  # HTTP request headers (for tenant extensions)
 
 
 from pgvector.sqlalchemy import Vector
