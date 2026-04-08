@@ -535,42 +535,63 @@ class OpenAICompatibleLLM(LLMInterface):
                     logger.error(f"Auth error (HTTP {e.status_code}), not retrying: {str(e)}")
                     raise
 
-                # Handle tool_use_failed error - model outputted in tool call format
+                # Handle tool_use_failed / json_validate_failed — try to salvage the output
                 if e.status_code == 400 and response_format is not None:
                     try:
                         error_body = e.body if hasattr(e, "body") else {}
                         if isinstance(error_body, dict):
                             error_info: dict[str, Any] = error_body.get("error") or {}
-                            if error_info.get("code") == "tool_use_failed":
+                            error_code = error_info.get("code", "")
+                            if error_code in ("tool_use_failed", "json_validate_failed"):
                                 failed_gen = error_info.get("failed_generation", "")
                                 if failed_gen:
-                                    # Parse tool call format and convert to expected format
-                                    tool_call = json.loads(failed_gen)
-                                    tool_name = tool_call.get("name", "")
-                                    tool_args = tool_call.get("arguments", {})
-                                    converted = {"actions": [{"tool": tool_name, **tool_args}]}
-                                    if skip_validation:
-                                        result = converted
-                                    else:
-                                        result = response_format.model_validate(converted)
+                                    parsed = json.loads(failed_gen)
+                                    # Try direct validation first (works for json_validate_failed
+                                    # where output is valid JSON but doesn't match schema)
+                                    candidates = [parsed]
+                                    # For tool_use_failed: model outputted tool call format,
+                                    # try extracting arguments as the actual response
+                                    if isinstance(parsed, dict) and "arguments" in parsed:
+                                        tool_args = parsed["arguments"]
+                                        if isinstance(tool_args, str):
+                                            tool_args = json.loads(tool_args)
+                                        candidates.append(tool_args)
+                                    # Legacy: fact extraction format {"actions": [...]}
+                                    if isinstance(parsed, dict) and "name" in parsed:
+                                        tool_name = parsed.get("name", "")
+                                        tool_args = parsed.get("arguments", {})
+                                        if isinstance(tool_args, str):
+                                            tool_args = json.loads(tool_args)
+                                        candidates.append({"actions": [{"tool": tool_name, **tool_args}]})
 
-                                    # Record metrics
-                                    duration = time.time() - start_time
-                                    metrics = get_metrics_collector()
-                                    metrics.record_llm_call(
-                                        provider=self.provider,
-                                        model=self.model,
-                                        scope=scope,
-                                        duration=duration,
-                                        input_tokens=0,
-                                        output_tokens=0,
-                                        success=True,
-                                    )
-                                    if return_usage:
-                                        return result, TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
-                                    return result
+                                    for candidate in candidates:
+                                        try:
+                                            if skip_validation:
+                                                result = candidate
+                                            else:
+                                                result = response_format.model_validate(candidate)
+                                            # Record metrics
+                                            duration = time.time() - start_time
+                                            metrics = get_metrics_collector()
+                                            metrics.record_llm_call(
+                                                provider=self.provider,
+                                                model=self.model,
+                                                scope=scope,
+                                                duration=duration,
+                                                input_tokens=0,
+                                                output_tokens=0,
+                                                success=True,
+                                            )
+                                            logger.info(f"Salvaged {error_code} response via candidate validation")
+                                            if return_usage:
+                                                return result, TokenUsage(
+                                                    input_tokens=0, output_tokens=0, total_tokens=0
+                                                )
+                                            return result
+                                        except Exception:
+                                            continue  # Try next candidate
                     except (json.JSONDecodeError, KeyError, TypeError):
-                        pass  # Failed to parse tool_use_failed, continue with normal retry
+                        pass  # Failed to parse failed_generation, continue with normal retry
 
                 last_exception = e
                 if attempt < max_retries:
@@ -760,6 +781,68 @@ class OpenAICompatibleLLM(LLMInterface):
                         f"not retrying: {_summarize_status_error(e)}"
                     )
                     raise
+
+                # output_parse_failed / tool_use_failed: model generated text or
+                # called a tool not in the filtered list.  Try to salvage:
+                # 1) If failed_generation is a valid tool call JSON → return as LLMToolCall
+                # 2) Otherwise return as text content for the agent loop
+                if e.status_code == 400:
+                    error_body = e.body if hasattr(e, "body") else {}
+                    # Extract error info — handle both {"error": {...}} and flat {...} formats
+                    error_info: dict[str, Any] = {}
+                    if isinstance(error_body, dict):
+                        inner = error_body.get("error")
+                        if isinstance(inner, dict):
+                            error_info = inner
+                        elif "code" in error_body:
+                            error_info = {str(k): v for k, v in error_body.items()}
+                    error_code = error_info.get("code", "")
+                    # Fallback: check str(e) if error_info parsing missed it
+                    if not error_code:
+                        err_str = str(e)
+                        if "tool_use_failed" in err_str:
+                            error_code = "tool_use_failed"
+                        elif "output_parse_failed" in err_str:
+                            error_code = "output_parse_failed"
+                    if error_code in ("output_parse_failed", "tool_use_failed"):
+                        failed_text = error_info.get("failed_generation", "")
+                        # Try to parse as tool call JSON and return as proper LLMToolCall
+                        if failed_text:
+                            try:
+                                parsed = json.loads(failed_text)
+                                if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
+                                    tool_args = parsed["arguments"]
+                                    if isinstance(tool_args, str):
+                                        tool_args = json.loads(tool_args)
+                                    salvaged_call = LLMToolCall(
+                                        id=f"salvaged_{int(time.time() * 1000)}",
+                                        name=parsed["name"],
+                                        arguments=tool_args,
+                                    )
+                                    logger.info(
+                                        f"Salvaged {error_code}: model called '{parsed['name']}' "
+                                        f"(not in filtered tools), returning as tool call"
+                                    )
+                                    return LLMToolCallResult(
+                                        content=None,
+                                        tool_calls=[salvaged_call],
+                                        finish_reason="tool_calls",
+                                        input_tokens=0,
+                                        output_tokens=0,
+                                    )
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                pass  # Not a tool call JSON, fall through to text return
+                        logger.warning(
+                            f"{error_code} in call_with_tools, returning as text content ({len(failed_text)} chars)"
+                        )
+                        return LLMToolCallResult(
+                            content=failed_text or None,
+                            tool_calls=[],
+                            finish_reason="stop",
+                            input_tokens=0,
+                            output_tokens=0,
+                        )
+
                 last_exception = e
                 if attempt < max_retries:
                     logger.warning(
