@@ -95,6 +95,64 @@ class CrossEncoderModel(ABC):
         pass
 
 
+def _fix_safetensors_alignment(model_name: str, log: logging.Logger) -> None:
+    """Check and fix safetensors alignment for ARM64 BLAS compatibility.
+
+    Some HuggingFace models have safetensors files with odd-length headers,
+    causing float32 tensors to land at non-4-byte-aligned offsets. On ARM64,
+    Apple Accelerate BLAS (cblas_sgemv$NEWLAPACK) requires strict alignment
+    and crashes with SIGBUS (EXC_ARM_DA_ALIGN) when accessing misaligned
+    mmap'd tensors.
+
+    Fix: reload tensors into properly aligned memory and resave the file.
+    """
+    import json
+    from pathlib import Path
+
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return
+
+    cached = try_to_load_from_cache(model_name, "model.safetensors")
+    if not cached or not isinstance(cached, (str, Path)):
+        return
+
+    safetensors_path = Path(cached)
+    if not safetensors_path.exists():
+        return
+
+    # Read header to check alignment
+    with open(safetensors_path, "rb") as f:
+        header_size = int.from_bytes(f.read(8), "little")
+
+    data_start = 8 + header_size
+    if data_start % 4 == 0:
+        return  # Already aligned
+
+    log.warning(
+        f"Reranker: safetensors misaligned (header={header_size}, data_start mod 4 = {data_start % 4}). "
+        f"Resaving for ARM64 BLAS compatibility..."
+    )
+
+    try:
+        import safetensors.torch as st
+
+        tensors = st.load_file(str(safetensors_path), device="cpu")
+        st.save_file(tensors, str(safetensors_path))
+
+        # Verify
+        with open(safetensors_path, "rb") as f:
+            new_header_size = int.from_bytes(f.read(8), "little")
+        new_data_start = 8 + new_header_size
+        if new_data_start % 4 == 0:
+            log.info(f"Reranker: safetensors resaved with aligned header ({new_header_size} bytes)")
+        else:
+            log.error(f"Reranker: safetensors still misaligned after resave (data_start mod 4 = {new_data_start % 4})")
+    except Exception as e:
+        log.error(f"Reranker: failed to fix safetensors alignment: {e}")
+
+
 class LocalSTCrossEncoder(CrossEncoderModel):
     """
     Local cross-encoder implementation using SentenceTransformers.
@@ -229,6 +287,15 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             transformers_logger.setLevel(logging.ERROR)
 
             try:
+                # On ARM64 (Apple Silicon), safetensors files with misaligned headers
+                # cause SIGBUS (EXC_ARM_DA_ALIGN) when loaded via mmap. The BLAS
+                # cblas_sgemv$NEWLAPACK requires 4-byte alignment for float32 tensors.
+                # Fix: check and resave misaligned safetensors before loading.
+                import platform
+
+                if platform.machine() == "arm64":
+                    _fix_safetensors_alignment(self.model_name, logger)
+
                 self._model = CrossEncoder(
                     self.model_name,
                     device=device,

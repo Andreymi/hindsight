@@ -178,6 +178,14 @@ class LocalSTEmbeddings(Embeddings):
             transformers_logger.setLevel(logging.ERROR)
 
             try:
+                # On ARM64, fix safetensors alignment before loading (same as cross_encoder.py)
+                import platform
+
+                if platform.machine() == "arm64":
+                    from .cross_encoder import _fix_safetensors_alignment
+
+                    _fix_safetensors_alignment(self.model_name, logger)
+
                 self._model = SentenceTransformer(
                     self.model_name,
                     device=device,
