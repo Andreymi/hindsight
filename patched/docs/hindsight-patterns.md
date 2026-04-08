@@ -1,14 +1,7 @@
-# Hindsight — Feature Patterns Guide
+# Hindsight — Справочник паттернов (v0.5.0)
 
-Экспериментально проверенные паттерны использования ключевых фич Hindsight.
-- v0.4.14: эксперименты 2026-03-03 на локальном (pg0) и Supabase (sup) профилях
-- v0.4.15: эксперименты 2026-03-05, обновлённые паттерны entity labels v2, новые фичи
-- v0.4.18: tag_groups (compound boolean predicates), observation_scopes
-- v0.4.19: retain strategies, verbatim/chunks extraction modes, adaptive consolidation
-- v0.4.20: reflect wall-clock timeout, fact_types/exclude_mental_models filters
-- v0.4.21: delta retain (content hashing), audit logging, LiteLLM provider, max_observations_per_scope
-- v0.4.22: mental model tag filtering (trigger.tags_match/tag_groups), document metadata API, custom LLM params
-- v0.5.0: bank templates (import/export), retain append mode, mental model detail levels, llamacpp local LLM, graph retrieval performance
+Проверенные паттерны использования Hindsight для AI-агентов с долгосрочной памятью.
+Актуально для v0.5.0 (апрель 2026). API: `hindsight-api-slim/`, CLI: `hindsight-embed` + `hindsight` (Rust).
 
 ---
 
@@ -291,7 +284,7 @@ hindsight-embed bank update <bank_id> --skepticism 5
 
 ---
 
-## 7. Новые фичи v0.4.15 — v0.4.19
+## 7. Retain & Extract — режимы и стратегии
 
 ### PydanticAI Integration (`hindsight-pydantic-ai`)
 
@@ -685,7 +678,7 @@ Prometheus метрики на `/metrics`:
 
 ---
 
-## 11. Delta Retain — оптимизация повторного retain (v0.4.21)
+## 11. Delta Retain — оптимизация повторного retain
 
 ### Что это
 При retain с тем же `document_id` (upsert) Hindsight вычисляет SHA256-хэш каждого чанка и сравнивает с существующими. Неизменённые чанки **пропускают LLM-экстракцию** — обрабатываются только новые/изменённые.
@@ -714,7 +707,7 @@ hindsight-embed memory retain bank "full document + new paragraph" --doc-id "con
 
 ---
 
-## 12. Mental Model Tag Filtering — управление scope при refresh (v0.4.22)
+## 12. Mental Model Tag Filtering — управление scope при refresh
 
 ### Что это
 Поля `trigger.tags_match` и `trigger.tag_groups` в конфигурации mental model. Контролируют, какие memories попадают в scope при auto-refresh.
@@ -748,7 +741,7 @@ curl -X PATCH ".../banks/{bank_id}/mental-models/{id}" -d '{
 
 ---
 
-## 13. Infrastructure Features v0.4.20–v0.4.22
+## 13. Infrastructure Features
 
 Фичи, которые не требуют отдельных разделов, но важны для production.
 
@@ -811,6 +804,15 @@ curl -X PATCH ".../banks/{bank_id}/mental-models/{id}" -d '{
 | Document Metadata API | v0.4.22 | ✅ Работает | metadata field в document list/get endpoints |
 | Custom LLM params (EXTRA_BODY) | v0.4.22 | ✅ Работает | Provider-specific params в LLM-запросах |
 | Experience classification fix | v0.4.22 | ✅ Исправлено | Текст от первого лица → experience fact_type |
+| Bank Templates | v0.5.0 | ✅ Готов | Export/import config + mental models + directives как JSON manifest |
+| Retain Append Mode | v0.5.0 | ✅ Готов | `update_mode: "append"` — инкрементальное дополнение документов |
+| Mental Model Detail Levels | v0.5.0 | ✅ Готов | `detail=metadata/content/full` — контроль payload |
+| llamacpp LLM | v0.5.0 | ✅ Готов | Offline inference (Gemma 4), auto-download, zero API keys |
+| OpenRouter LLM/emb/reranker | v0.5.0 | ✅ Готов | 100+ моделей через единый API key |
+| Entity Fanout Cap | v0.5.0 | ✅ Авто | 200 per-entity limit, 84% ускорение на больших графах |
+| Clear Memories ≠ Delete Bank | v0.5.0 | ✅ Исправлено | DELETE /memories сохраняет bank profile |
+| Proof Count Boost | v0.5.0 | ✅ Авто | Факты с 50+ proofs ранжируются выше |
+| Sync Retain (MCP) | v0.5.0 | ✅ Готов | Синхронный retain без polling для MCP-клиентов |
 
 ---
 
@@ -892,7 +894,7 @@ curl -X POST ".../banks/{bank_id}/memories/retain" \
 
 ---
 
-## 11. Фичи v0.5.0
+## 14. Bank Templates, Append Mode, и другие фичи v0.5.0
 
 ### 11.1. Bank Templates — версионирование конфигурации банков
 
