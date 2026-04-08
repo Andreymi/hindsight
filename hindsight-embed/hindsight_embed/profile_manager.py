@@ -275,6 +275,26 @@ class ProfileManager:
 
         self._save_metadata(metadata)
 
+    def update_metadata_only(self, name: str, port: int) -> None:
+        """Update only metadata (port, last_used) without touching the .env file.
+
+        Used when ensure_running detects the daemon is already up but the caller
+        has no HINDSIGHT_API_* keys to write — avoids overwriting the profile's
+        .env with an empty file.
+        """
+        metadata = self._load_metadata()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if name in metadata.profiles:
+            metadata.profiles[name]["last_used"] = now_iso
+            metadata.profiles[name]["port"] = port
+        else:
+            metadata.profiles[name] = {
+                "port": port,
+                "created_at": now_iso,
+                "last_used": now_iso,
+            }
+        self._save_metadata(metadata)
+
     def delete_profile(self, name: str):
         """Delete a profile.
 

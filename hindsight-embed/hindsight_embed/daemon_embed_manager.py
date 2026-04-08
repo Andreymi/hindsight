@@ -477,17 +477,16 @@ class DaemonEmbedManager(EmbedManager):
             console.print()
             return False
 
-    def _register_profile(self, profile: str, port: int, config: dict) -> None:
+    def _register_profile(self, profile: str, port: int, config: dict) -> None:  # noqa: ARG002
         """Register a named profile in metadata so it's discoverable by the CLI.
 
-        Only saves HINDSIGHT_API_* config keys (not internal daemon keys).
+        Only updates metadata (port, last_used). Never overwrites the .env file —
+        it may contain comments, HINDSIGHT_EMBED_* keys, and hand-tuned config
+        that would be lost by create_profile()'s HINDSIGHT_API_* filter.
         Silently ignores errors to avoid blocking daemon startup.
         """
         try:
-            api_config = {k: v for k, v in config.items() if k.startswith("HINDSIGHT_API_")}
-            if not api_config:
-                return
-            self._profile_manager.create_profile(profile, port, api_config)
+            self._profile_manager.update_metadata_only(profile, port)
         except Exception as e:
             logger.debug(f"Failed to register profile '{profile}' in metadata: {e}")
 
