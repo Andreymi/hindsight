@@ -297,7 +297,11 @@ class DaemonEmbedManager(EmbedManager):
                 env[key] = str(value)
 
         # Use profile-specific database (check config for override)
-        db_override = config.get("HINDSIGHT_EMBED_API_DATABASE_URL") or env.get("HINDSIGHT_EMBED_API_DATABASE_URL")
+        db_override = (
+            config.get("HINDSIGHT_API_DATABASE_URL")
+            or config.get("HINDSIGHT_EMBED_API_DATABASE_URL")
+            or env.get("HINDSIGHT_EMBED_API_DATABASE_URL")
+        )
         if db_override:
             env["HINDSIGHT_API_DATABASE_URL"] = db_override
         else:
