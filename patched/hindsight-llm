@@ -1,0 +1,445 @@
+#!/usr/bin/env bash
+#
+# hindsight-llm — switch LLM provider/model for hindsight-embed daemon
+#
+# Config priority: .env (override=True) > profile env > os.environ
+# This means .env is the central authority. Profile-specific LLM config only
+# takes effect when the var is NOT in .env (use "delegate" to achieve this).
+#
+# Usage:
+#   hindsight-llm                                        Show effective config
+#   hindsight-llm <preset> [--scope SCOPE]               Switch LLM in .env
+#   hindsight-llm clear <scope>                          Clear scope override
+#   hindsight-llm delegate <scope> <preset> -p <profile> Move scope out of .env into profile
+#   hindsight-llm centralize <scope> <preset>            Move scope back to .env from profiles
+#   hindsight-llm add <name> <provider> <model> [url]    Create preset
+#   hindsight-llm rm <name>                              Remove preset
+#   hindsight-llm list                                   List presets
+
+set -euo pipefail
+
+PRESETS_DIR="$HOME/.hindsight/presets"
+DOTENV="$(git rev-parse --show-toplevel 2>/dev/null)/.env"
+EMBED_PROFILE="$HOME/.hindsight/embed"
+PROFILES_DIR="$HOME/.hindsight/profiles"
+
+# Known provider defaults
+declare -A PROVIDER_URLS=(
+    [groq]="https://api.groq.com/openai/v1"
+    [openai]="https://api.openai.com/v1"
+    [ollama]="http://localhost:11434/v1"
+    [ollama-cloud]="https://ollama.com/v1"
+)
+
+# Colors
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; DIM='\033[2m'; BOLD='\033[1m'; NC='\033[0m'
+
+# --- Helpers ---
+
+_scope_prefix() {
+    case "$1" in
+        default|retain)  echo "" ;;
+        consolidation)   echo "CONSOLIDATION_" ;;
+        reflect)         echo "REFLECT_" ;;
+        *)               echo -e "${RED}Unknown scope: $1${NC}" >&2; exit 1 ;;
+    esac
+}
+
+_scope_vars() {
+    # List of env var suffixes for a scope
+    echo "PROVIDER MODEL BASE_URL API_KEY"
+}
+
+_actual_provider() {
+    local p="$1"
+    [[ "$p" == "ollama-cloud" ]] && echo "openai" || echo "$p"
+}
+
+_extract_key() {
+    local provider="$1"
+    case "$provider" in
+        groq)
+            grep -m1 'HINDSIGHT_API_LLM_API_KEY=' "$DOTENV" 2>/dev/null | cut -d= -f2- \
+                || grep -m1 'HINDSIGHT_API_LLM_API_KEY=' "$EMBED_PROFILE" 2>/dev/null | cut -d= -f2-
+            ;;
+        openai|ollama-cloud)
+            # Check all profiles for OAI-compatible key
+            for f in "$PROFILES_DIR"/*.env; do
+                [[ -f "$f" ]] || continue
+                local k=$(grep -m1 'HINDSIGHT_API_LLM_API_KEY=' "$f" 2>/dev/null | cut -d= -f2-)
+                [[ -n "$k" ]] && echo "$k" && return
+            done
+            grep -m1 'HINDSIGHT_API_LLM_API_KEY=' "$DOTENV" 2>/dev/null | cut -d= -f2-
+            ;;
+        ollama)
+            echo "ollama"
+            ;;
+        *)
+            grep -m1 'HINDSIGHT_API_LLM_API_KEY=' "$DOTENV" 2>/dev/null | cut -d= -f2-
+            ;;
+    esac
+}
+
+_read_preset() {
+    local preset_file="$PRESETS_DIR/$1.env"
+    if [[ ! -f "$preset_file" ]]; then
+        echo -e "${RED}Preset '$1' not found.${NC} Available:" >&2
+        _list_presets >&2
+        exit 1
+    fi
+    PRESET_PROVIDER=$(grep '^PROVIDER=' "$preset_file" | cut -d= -f2-)
+    PRESET_MODEL=$(grep '^MODEL=' "$preset_file" | cut -d= -f2-)
+    PRESET_BASE_URL=$(grep '^BASE_URL=' "$preset_file" | cut -d= -f2-)
+}
+
+_set_var() {
+    local file="$1" key="$2" value="$3"
+    if grep -q "^${key}=" "$file" 2>/dev/null; then
+        sed -i '' "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
+_remove_var() {
+    local file="$1" key="$2"
+    sed -i '' "/^${key}=/d" "$file" 2>/dev/null || true
+}
+
+_get_var() {
+    # Get value of key from file, empty if not found
+    grep "^${2}=" "$1" 2>/dev/null | cut -d= -f2- || true
+}
+
+# --- Core operations ---
+
+_set_scope_in_file() {
+    # Write provider/model/base_url/api_key for a scope into a file
+    local file="$1" scope="$2" provider="$3" model="$4" base_url="$5" api_key="$6"
+    local prefix=$(_scope_prefix "$scope")
+    local actual=$(_actual_provider "$provider")
+
+    _set_var "$file" "HINDSIGHT_API_${prefix}LLM_PROVIDER" "$actual"
+    _set_var "$file" "HINDSIGHT_API_${prefix}LLM_MODEL" "$model"
+    _set_var "$file" "HINDSIGHT_API_${prefix}LLM_BASE_URL" "$base_url"
+    [[ -n "$api_key" ]] && _set_var "$file" "HINDSIGHT_API_${prefix}LLM_API_KEY" "$api_key"
+}
+
+_clear_scope_in_file() {
+    # Remove scope vars from a file
+    local file="$1" scope="$2"
+    local prefix=$(_scope_prefix "$scope")
+    for suffix in $(_scope_vars); do
+        _remove_var "$file" "HINDSIGHT_API_${prefix}LLM_${suffix}"
+    done
+}
+
+_show_scope_line() {
+    # Print one scope line with source info
+    local scope="$1" file="$2" source_label="$3"
+    local prefix=$(_scope_prefix "$scope")
+    local provider=$(_get_var "$file" "HINDSIGHT_API_${prefix}LLM_PROVIDER")
+    local model=$(_get_var "$file" "HINDSIGHT_API_${prefix}LLM_MODEL")
+
+    if [[ -n "$provider" || -n "$model" ]]; then
+        echo -e "  ${YELLOW}${scope}${NC}: ${provider:-?} / ${model:-?} ${DIM}← ${source_label}${NC}"
+    fi
+}
+
+# --- Commands ---
+
+_show_status() {
+    echo -e "${BOLD}Effective LLM config:${NC}"
+    echo -e "${DIM}  (.env wins over profiles via load_dotenv override=True)${NC}"
+    echo ""
+
+    # For each scope, show what .env says (effective), then profile overrides (shadowed)
+    for scope in default consolidation reflect; do
+        local prefix=$(_scope_prefix "$scope")
+        local dotenv_provider=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_PROVIDER")
+        local dotenv_model=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_MODEL")
+
+        if [[ -n "$dotenv_provider" || -n "$dotenv_model" ]]; then
+            echo -e "  ${YELLOW}${scope}${NC}: ${CYAN}${dotenv_provider:-?}${NC} / ${YELLOW}${dotenv_model:-?}${NC} ${DIM}← .env (central)${NC}"
+        elif [[ "$scope" != "default" ]]; then
+            echo -e "  ${YELLOW}${scope}${NC}: ${DIM}(inherits default)${NC}"
+        fi
+
+        # Check embed + named profiles
+        for f in "$EMBED_PROFILE" "$PROFILES_DIR"/*.env; do
+            [[ -f "$f" ]] || continue
+            local pname
+            if [[ "$f" == "$EMBED_PROFILE" ]]; then
+                pname="embed (default)"
+            else
+                pname=$(basename "$f" .env)
+            fi
+            local p_provider=$(_get_var "$f" "HINDSIGHT_API_${prefix}LLM_PROVIDER")
+            local p_model=$(_get_var "$f" "HINDSIGHT_API_${prefix}LLM_MODEL")
+            if [[ -n "$p_provider" || -n "$p_model" ]]; then
+                if [[ -n "$dotenv_provider" ]]; then
+                    echo -e "    ${DIM}⚠ ${pname}: ${p_provider} / ${p_model} (shadowed by .env)${NC}"
+                else
+                    echo -e "    ${GREEN}↳${NC} ${DIM}${pname}: ${p_provider} / ${p_model} (active)${NC}"
+                fi
+            fi
+        done
+    done
+
+    echo ""
+}
+
+_list_presets() {
+    echo -e "${CYAN}Presets:${NC}"
+    for f in "$PRESETS_DIR"/*.env; do
+        [[ -f "$f" ]] || continue
+        local name=$(basename "$f" .env)
+        local model=$(grep '^MODEL=' "$f" | cut -d= -f2-)
+        local provider=$(grep '^PROVIDER=' "$f" | cut -d= -f2-)
+        echo -e "  ${YELLOW}${name}${NC}  →  ${provider} / ${model}"
+    done
+}
+
+_add_preset() {
+    local name="$1" provider="$2" model="$3" base_url="${4:-}"
+
+    if [[ -z "$base_url" ]]; then
+        base_url="${PROVIDER_URLS[$provider]:-}"
+        if [[ -z "$base_url" ]]; then
+            echo -e "${RED}Unknown provider '$provider' — specify base_url as 4th arg${NC}" >&2
+            echo -e "${DIM}Known providers: ${!PROVIDER_URLS[*]}${NC}" >&2
+            exit 1
+        fi
+        echo -e "${DIM}  (auto base_url: ${base_url})${NC}"
+    fi
+
+    mkdir -p "$PRESETS_DIR"
+    cat > "$PRESETS_DIR/${name}.env" <<EOF
+PROVIDER=${provider}
+MODEL=${model}
+BASE_URL=${base_url}
+EOF
+    echo -e "${GREEN}✓${NC} Created preset ${YELLOW}${name}${NC}: ${CYAN}${provider}${NC} / ${YELLOW}${model}${NC}"
+}
+
+_rm_preset() {
+    local preset_file="$PRESETS_DIR/${1}.env"
+    if [[ ! -f "$preset_file" ]]; then
+        echo -e "${RED}Preset '$1' not found.${NC}" >&2; exit 1
+    fi
+    rm "$preset_file"
+    echo -e "${GREEN}✓${NC} Removed preset ${YELLOW}${1}${NC}"
+}
+
+_restart_daemon() {
+    local profile="${1:-}"
+    local flag=""
+    [[ -n "$profile" ]] && flag="-p $profile"
+    local label="${profile:-default}"
+    echo -e "  ${CYAN}Restarting daemon [${label}]...${NC}"
+    hindsight-embed $flag daemon stop 2>/dev/null || true
+    sleep 1
+    hindsight-embed $flag daemon start
+    echo -e "  ${GREEN}✓ Daemon restarted${NC}"
+}
+
+_usage() {
+    cat <<'EOF'
+Usage:
+  hindsight-llm                                          Show effective config
+  hindsight-llm <preset> [--scope SCOPE]                 Switch LLM in .env (central)
+  hindsight-llm clear <scope>                            Clear scope from .env (inherit default)
+  hindsight-llm delegate <scope> -p <profile> [preset]   Per-profile LLM (saves .env→embed, sets profile, clears .env)
+  hindsight-llm centralize <scope> [preset]              Move scope back to .env, remove from profiles
+  hindsight-llm add <name> <provider> <model> [url]      Create preset
+  hindsight-llm rm <name>                                Remove preset
+  hindsight-llm list                                     List presets
+
+Config priority: .env (override=True) > profile > os.environ
+  Central (in .env):    same LLM for all daemons
+  Delegated (profile):  per-daemon LLM (var must NOT be in .env)
+
+Scopes: default, consolidation, reflect, all
+Providers (auto base_url): groq, openai, ollama, ollama-cloud
+
+Examples:
+  hindsight-llm groq                                     # default scope → groq
+  hindsight-llm oc-qwen --scope consolidation            # consolidation → ollama cloud qwen
+  hindsight-llm clear consolidation                      # consolidation inherits default
+  hindsight-llm delegate default -p sup ollama-cloud     # sup gets its own default LLM
+  hindsight-llm centralize default groq                  # all daemons use groq again
+  hindsight-llm add phi4 ollama phi4:14b                 # new preset
+EOF
+}
+
+# --- Main: extract -p flag globally ---
+ARGS=()
+TARGET_PROFILE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--profile) TARGET_PROFILE="$2"; shift 2 ;;
+        *)            ARGS+=("$1"); shift ;;
+    esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
+if [[ $# -eq 0 ]]; then
+    _show_status
+    _list_presets
+    exit 0
+fi
+
+case "$1" in
+    status)  _show_status; exit 0 ;;
+    list)    _list_presets; exit 0 ;;
+    help|-h|--help) _usage; exit 0 ;;
+
+    add)
+        shift
+        [[ $# -lt 3 ]] && { echo -e "${RED}Usage: hindsight-llm add <name> <provider> <model> [url]${NC}" >&2; exit 1; }
+        _add_preset "$@"; exit 0
+        ;;
+
+    rm)
+        shift
+        [[ $# -lt 1 ]] && { echo -e "${RED}Usage: hindsight-llm rm <name>${NC}" >&2; exit 1; }
+        _rm_preset "$1"; exit 0
+        ;;
+
+    clear)
+        shift
+        [[ $# -lt 1 ]] && { echo -e "${RED}Usage: hindsight-llm clear <scope>${NC}" >&2; exit 1; }
+        SCOPE="$1"; shift
+        NO_RESTART=false; [[ "${1:-}" == "--no-restart" ]] && NO_RESTART=true
+
+        echo -e "${CYAN}Clearing ${SCOPE} from .env:${NC}"
+        if [[ "$SCOPE" == "all" ]]; then
+            _clear_scope_in_file "$DOTENV" "consolidation"
+            _clear_scope_in_file "$DOTENV" "reflect"
+            echo -e "  ${GREEN}✓${NC} consolidation + reflect cleared (inherit default)"
+        elif [[ "$SCOPE" == "default" ]]; then
+            echo -e "${RED}Cannot clear default — use a preset to change it${NC}" >&2; exit 1
+        else
+            _clear_scope_in_file "$DOTENV" "$SCOPE"
+            echo -e "  ${GREEN}✓${NC} ${SCOPE}: cleared (inherits default)"
+        fi
+        $NO_RESTART || _restart_daemon ""
+        exit 0
+        ;;
+
+    delegate)
+        # delegate <scope> -p <profile> <preset_for_profile>
+        # 1. Copy current .env scope values → embed (default daemon fallback)
+        # 2. Set preset in the specified profile
+        # 3. Remove scope from .env so profiles take effect
+        shift
+        [[ $# -lt 1 ]] && { echo -e "${RED}Usage: hindsight-llm delegate <scope> -p <profile> <preset>${NC}" >&2; exit 1; }
+        SCOPE="$1"; shift
+        [[ -z "$TARGET_PROFILE" ]] && { echo -e "${RED}-p <profile> is required for delegate${NC}" >&2; exit 1; }
+        PRESET="${1:-}"
+        NO_RESTART=false; [[ "${2:-}" == "--no-restart" ]] && NO_RESTART=true
+
+        PROFILE_FILE="$PROFILES_DIR/${TARGET_PROFILE}.env"
+        [[ ! -f "$PROFILE_FILE" ]] && { echo -e "${RED}Profile not found: ${PROFILE_FILE}${NC}" >&2; exit 1; }
+
+        echo -e "${CYAN}Delegating ${SCOPE} to profiles:${NC}"
+
+        # Step 1: Save current .env values into embed (default daemon fallback)
+        prefix=$(_scope_prefix "$SCOPE")
+        cur_provider=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_PROVIDER")
+        cur_model=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_MODEL")
+        cur_base_url=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_BASE_URL")
+        cur_api_key=$(_get_var "$DOTENV" "HINDSIGHT_API_${prefix}LLM_API_KEY")
+
+        if [[ -n "$cur_provider" ]]; then
+            _set_scope_in_file "$EMBED_PROFILE" "$SCOPE" "$cur_provider" "$cur_model" "$cur_base_url" "$cur_api_key"
+            echo -e "  ${GREEN}✓${NC} embed (default): ${CYAN}${cur_provider}${NC} / ${YELLOW}${cur_model}${NC} ${DIM}(saved from .env)${NC}"
+        else
+            echo -e "  ${DIM}(default scope not in .env — embed unchanged)${NC}"
+        fi
+
+        # Step 2: Set preset in the target profile
+        if [[ -n "$PRESET" ]]; then
+            _read_preset "$PRESET"
+            API_KEY=$(_extract_key "$PRESET_PROVIDER")
+            _set_scope_in_file "$PROFILE_FILE" "$SCOPE" "$PRESET_PROVIDER" "$PRESET_MODEL" "$PRESET_BASE_URL" "$API_KEY"
+            echo -e "  ${GREEN}✓${NC} ${TARGET_PROFILE}: ${CYAN}${PRESET_PROVIDER}${NC} / ${YELLOW}${PRESET_MODEL}${NC}"
+        else
+            echo -e "  ${DIM}(no preset for ${TARGET_PROFILE} — keeping existing values)${NC}"
+        fi
+
+        # Step 3: Remove from .env so profiles take effect
+        _clear_scope_in_file "$DOTENV" "$SCOPE"
+        echo -e "  ${GREEN}✓${NC} Removed ${SCOPE} from .env → profiles now active"
+
+        if ! $NO_RESTART; then
+            _restart_daemon ""
+            _restart_daemon "$TARGET_PROFILE"
+        fi
+        exit 0
+        ;;
+
+    centralize)
+        # centralize <scope> [preset]
+        # Sets scope in .env (overrides all profiles), removes from profiles
+        shift
+        [[ $# -lt 1 ]] && { echo -e "${RED}Usage: hindsight-llm centralize <scope> [preset]${NC}" >&2; exit 1; }
+        SCOPE="$1"; shift
+        PRESET="${1:-}"
+        NO_RESTART=false; [[ "${2:-}" == "--no-restart" ]] && NO_RESTART=true
+
+        echo -e "${CYAN}Centralizing ${SCOPE} to .env:${NC}"
+
+        if [[ -n "$PRESET" ]]; then
+            _read_preset "$PRESET"
+            API_KEY=$(_extract_key "$PRESET_PROVIDER")
+            _set_scope_in_file "$DOTENV" "$SCOPE" "$PRESET_PROVIDER" "$PRESET_MODEL" "$PRESET_BASE_URL" "$API_KEY"
+            echo -e "  ${GREEN}✓${NC} .env/${SCOPE}: ${CYAN}${PRESET_PROVIDER}${NC} / ${YELLOW}${PRESET_MODEL}${NC}"
+        else
+            echo -e "  ${DIM}(no preset — keeping existing .env values)${NC}"
+        fi
+
+        # Remove from all profiles
+        for f in "$PROFILES_DIR"/*.env; do
+            [[ -f "$f" ]] || continue
+            pname=$(basename "$f" .env)
+            _clear_scope_in_file "$f" "$SCOPE"
+            echo -e "  ${GREEN}✓${NC} Removed ${SCOPE} from profile '${pname}'"
+        done
+
+        $NO_RESTART || _restart_daemon ""
+        exit 0
+        ;;
+esac
+
+# --- Default: switch preset in .env ---
+PRESET="$1"; shift
+SCOPE="default"
+NO_RESTART=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --scope)      SCOPE="$2"; shift 2 ;;
+        --no-restart) NO_RESTART=true; shift ;;
+        *)            echo -e "${RED}Unknown arg: $1${NC}" >&2; exit 1 ;;
+    esac
+done
+
+_read_preset "$PRESET"
+API_KEY=$(_extract_key "$PRESET_PROVIDER")
+[[ -z "$API_KEY" ]] && { echo -e "${RED}No API key found for provider '$PRESET_PROVIDER'${NC}" >&2; exit 1; }
+
+echo -e "${CYAN}Switching .env to preset '${PRESET}':${NC}"
+
+if [[ "$SCOPE" == "all" ]]; then
+    _set_scope_in_file "$DOTENV" "default" "$PRESET_PROVIDER" "$PRESET_MODEL" "$PRESET_BASE_URL" "$API_KEY"
+    _clear_scope_in_file "$DOTENV" "consolidation"
+    _clear_scope_in_file "$DOTENV" "reflect"
+    echo -e "  ${GREEN}✓${NC} default: ${CYAN}${PRESET_PROVIDER}${NC} / ${YELLOW}${PRESET_MODEL}${NC}"
+    echo -e "  ${GREEN}✓${NC} consolidation + reflect: cleared (inherit default)"
+else
+    _set_scope_in_file "$DOTENV" "$SCOPE" "$PRESET_PROVIDER" "$PRESET_MODEL" "$PRESET_BASE_URL" "$API_KEY"
+    echo -e "  ${GREEN}✓${NC} ${SCOPE}: ${CYAN}${PRESET_PROVIDER}${NC} / ${YELLOW}${PRESET_MODEL}${NC}"
+fi
+
+$NO_RESTART || _restart_daemon ""

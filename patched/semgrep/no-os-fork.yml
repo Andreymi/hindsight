@@ -1,0 +1,18 @@
+rules:
+  - id: no-os-fork-use-subprocess
+    pattern: os.fork()
+    paths:
+      exclude:
+        - hindsight-api-slim/hindsight_api/daemon.py
+    message: >
+      os.fork() breaks MPS (Metal Performance Shaders) on macOS. XPC connections
+      to the GPU compiler become invalid in the forked child process, causing
+      "XPC_ERROR_CONNECTION_INVALID" crashes. Use subprocess.Popen with
+      start_new_session=True instead — see spawn_daemon_subprocess() in daemon.py.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: correctness
+      technology:
+        - python
+        - macos

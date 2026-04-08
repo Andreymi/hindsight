@@ -1,0 +1,30 @@
+rules:
+  - id: parse-datetime-flexible-missing-null-check
+    patterns:
+      - pattern: |
+          $X = parse_datetime_flexible($Y)
+          ...
+          $X.$METHOD(...)
+      - pattern-not: |
+          $X = parse_datetime_flexible($Y)
+          ...
+          if $X is not None:
+              ...
+      - pattern-not: |
+          $X = parse_datetime_flexible($Y)
+          if $X is not None:
+              ...
+    paths:
+      include:
+        - hindsight-api-slim/hindsight_api/engine/
+    message: >
+      parse_datetime_flexible() can return None (when input is "unset", invalid,
+      or None). Calling methods on the result without a None check will raise
+      AttributeError. Always check `if $X is not None:` before using the result.
+      See: v0.4.15 timestamp="unset" bug.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: correctness
+      references:
+        - https://github.com/vectorize-io/hindsight/issues/601

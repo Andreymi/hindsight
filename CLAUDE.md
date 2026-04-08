@@ -181,6 +181,29 @@ Key tables: `banks`, `memory_units`, `documents`, `entities`, `entity_links`
 
 **MANDATORY: Run `/code-review` before pushing code or creating a pull request.** Do not push or create a PR until all "must fix" issues are resolved.
 
+**Use AST-based tools instead:**
+```bash
+# Semgrep custom rule with autofix (preferred)
+semgrep --config patched/semgrep/ --autofix
+
+# Or use the MCP semgrep plugin for scan + custom rules
+```
+
+Custom semgrep rules in `patched/semgrep/` serve as **regression guards** for our patches. Run after every upstream merge:
+```bash
+# Check for regressions (0 findings = clean)
+semgrep --config patched/semgrep/ --no-git-ignore
+
+# Auto-fix violations
+semgrep --config patched/semgrep/ --no-git-ignore --autofix
+```
+
+| Rule | What it catches | Why |
+|------|----------------|-----|
+| `ensure-ascii.yml` | `json.dumps()` without `ensure_ascii=False` in engine/ | Non-ASCII (Russian, Chinese) gets escaped to `\uXXXX` in DB/logs/LLM prompts |
+| `parse-datetime-null-check.yml` | `parse_datetime_flexible()` result used without None check | Returns None for "unset"/invalid input → AttributeError (v0.4.15 bug) |
+| `no-os-fork.yml` | `os.fork()` outside daemon.py | Breaks MPS/Metal GPU on macOS — use `subprocess.Popen` instead |
+
 ### Memory Banks
 - Each bank is an isolated memory store (like a "brain" for one user/agent)
 - Banks have dispositions (skepticism, literalism, empathy traits 1-5) affecting reflect

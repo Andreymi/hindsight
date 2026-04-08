@@ -1,0 +1,23 @@
+rules:
+  - id: json-dumps-missing-ensure-ascii
+    pattern-either:
+      - patterns:
+          - pattern: json.dumps(...)
+          - pattern-not-regex: ensure_ascii
+    fix-regex:
+      regex: (json\.dumps\([^)]*)\)
+      replacement: \1, ensure_ascii=False)
+    paths:
+      include:
+        - hindsight-api-slim/hindsight_api/engine/
+        - hindsight-embed/
+    message: >
+      json.dumps() without ensure_ascii=False will escape non-ASCII characters
+      (e.g. Russian, Chinese) as \uXXXX sequences. This breaks readability in
+      logs, database fields, and LLM prompts. Add ensure_ascii=False.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: correctness
+      technology:
+        - python
