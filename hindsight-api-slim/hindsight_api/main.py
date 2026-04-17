@@ -151,7 +151,7 @@ def main():
         args.host = "127.0.0.1"
 
         # Spawn daemon as subprocess (not fork!) to preserve MPS/Metal GPU support
-        pid = spawn_daemon_subprocess(idle_timeout=args.idle_timeout)
+        pid = spawn_daemon_subprocess(idle_timeout=args.idle_timeout, port=args.port)
         print(f"Daemon started with PID {pid}")
         sys.exit(0)  # Parent exits, daemon continues in subprocess
 

@@ -124,7 +124,7 @@ def daemonize():
     os.dup2(log_fd.fileno(), sys.stderr.fileno())
 
 
-def spawn_daemon_subprocess(idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> int:
+def spawn_daemon_subprocess(idle_timeout: int = DEFAULT_IDLE_TIMEOUT, port: int | None = None) -> int:
     """
     Spawn daemon as a new subprocess instead of forking.
 
@@ -134,6 +134,9 @@ def spawn_daemon_subprocess(idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> int:
 
     Args:
         idle_timeout: Idle timeout in seconds (0 = no auto-exit)
+        port: Port to bind to in the child. When omitted the child falls back
+            to its own default (DEFAULT_DAEMON_PORT), which only matches the
+            caller's intent when they did not pass --port themselves.
 
     Returns:
         PID of the spawned daemon process
@@ -155,6 +158,10 @@ def spawn_daemon_subprocess(idle_timeout: int = DEFAULT_IDLE_TIMEOUT) -> int:
     # Pass idle timeout
     if idle_timeout > 0:
         cmd.append(f"--idle-timeout={idle_timeout}")
+
+    # Forward --port so named profiles (e.g. sup @ 8890) don't fall back to 8888
+    if port is not None:
+        cmd.extend(["--port", str(port)])
 
     # Ensure log directory exists
     DAEMON_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
