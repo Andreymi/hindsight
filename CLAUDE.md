@@ -204,6 +204,30 @@ semgrep --config patched/semgrep/ --no-git-ignore --autofix
 | `parse-datetime-null-check.yml` | `parse_datetime_flexible()` result used without None check | Returns None for "unset"/invalid input → AttributeError (v0.4.15 bug) |
 | `no-os-fork.yml` | `os.fork()` outside daemon.py | Breaks MPS/Metal GPU on macOS — use `subprocess.Popen` instead |
 
+### Local Tool Installation (editable from this repo)
+
+**Never install `hindsight-embed` or `hindsight` (Rust CLI) from PyPI / uvx / crates.io** — the whole point of the `patched` branch is that our fixes must run in the tools we use. All three components must stay aligned with the local repo:
+
+```bash
+# Python CLI (editable — auto-picks up repo edits, no reinstall needed for code changes)
+uv tool install --editable ./hindsight-embed --reinstall
+
+# Rust CLI (binary — rebuild + copy after each rebase or Rust-side edit)
+cargo build --release --manifest-path ./hindsight-cli/Cargo.toml
+cp ./hindsight-cli/target/release/hindsight ~/.local/bin/hindsight
+
+# API daemon — runs via `uv run --project ./hindsight-api-slim hindsight-api`,
+# automatically editable against the local checkout. Nothing to reinstall.
+```
+
+**Sanity check after every rebase**:
+```bash
+hindsight-embed --version   # must equal pyproject.toml [project.version] in hindsight-embed/
+hindsight --version         # must equal Cargo.toml [package.version] in hindsight-cli/
+```
+
+If versions drift, the installed tool is stale — reinstall per above. A stale `hindsight-embed` silently spawns the old daemon manager logic (no flock, wrong env passthrough); a stale `hindsight` binary talks to the API with outdated request shapes.
+
 ### Memory Banks
 - Each bank is an isolated memory store (like a "brain" for one user/agent)
 - Banks have dispositions (skepticism, literalism, empathy traits 1-5) affecting reflect
