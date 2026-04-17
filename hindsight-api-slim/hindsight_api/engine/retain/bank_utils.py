@@ -167,7 +167,7 @@ async def get_or_create_bank_profile(pool, bank_id: str) -> tuple[BankProfile, b
             """,
             bank_id,
             bank_id,  # Default name is the bank_id
-            json.dumps(DEFAULT_DISPOSITION),
+            json.dumps(DEFAULT_DISPOSITION, ensure_ascii=False),
             "",
             internal_id,
         )
@@ -204,7 +204,7 @@ async def update_bank_disposition(pool, bank_id: str, disposition: dict[str, int
             WHERE bank_id = $1
             """,
             bank_id,
-            json.dumps(disposition),
+            json.dumps(disposition, ensure_ascii=False),
         )
 
 

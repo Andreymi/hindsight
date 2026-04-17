@@ -917,7 +917,7 @@ class MemoryEngine(MemoryEngineInterface):
                     retain_operation_id,
                     bank_id,
                     "retain",
-                    json.dumps({}),
+                    json.dumps({}, ensure_ascii=False),
                     "pending",
                     payload_json,
                 )
@@ -1323,7 +1323,8 @@ class MemoryEngine(MemoryEngineInterface):
                     "last_status_code": status_code,
                     "last_response_body": (response_body or "")[:2048],
                     "last_attempt_at": datetime.now(UTC).isoformat(),
-                }
+                },
+                ensure_ascii=False,
             )
             async with acquire_with_retry(pool) as conn:
                 await conn.execute(
@@ -1353,7 +1354,7 @@ class MemoryEngine(MemoryEngineInterface):
         http_config = WebhookHttpConfig.model_validate(task_dict.get("http_config") or {})
 
         if isinstance(raw_payload, dict):
-            payload_bytes = json.dumps(raw_payload).encode()
+            payload_bytes = json.dumps(raw_payload, ensure_ascii=False).encode()
         else:
             payload_bytes = str(raw_payload).encode()
 
@@ -1617,7 +1618,7 @@ class MemoryEngine(MemoryEngineInterface):
                 AND result_metadata::jsonb @> $2::jsonb
                 """,
                 bank_id,
-                json.dumps({"parent_operation_id": parent_operation_id}),
+                json.dumps({"parent_operation_id": parent_operation_id}, ensure_ascii=False),
             )
 
             if not siblings:
@@ -6980,7 +6981,7 @@ class MemoryEngine(MemoryEngineInterface):
                     embedding_str,
                     tags or [],
                     max_tokens,
-                    json.dumps(trigger) if trigger else None,
+                    json.dumps(trigger, ensure_ascii=False) if trigger else None,
                 )
             else:
                 row = await conn.fetchrow(
@@ -6999,7 +7000,7 @@ class MemoryEngine(MemoryEngineInterface):
                     embedding_str,
                     tags or [],
                     max_tokens,
-                    json.dumps(trigger) if trigger else None,
+                    json.dumps(trigger, ensure_ascii=False) if trigger else None,
                 )
 
         logger.info(f"[MENTAL_MODELS] Created pinned mental model '{name}' for bank {bank_id}")
@@ -7449,7 +7450,8 @@ class MemoryEngine(MemoryEngineInterface):
                                 "previous_reflect_response": previous_reflect_response,
                                 "changed_at": datetime.now(timezone.utc).isoformat(),
                             }
-                        ]
+                        ],
+                        ensure_ascii=False,
                     )
                     updates.append(f"history = COALESCE(history, '[]'::jsonb) || ${param_idx}::jsonb")
                     params.append(history_entry)
@@ -7464,7 +7466,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             if reflect_response is not None:
                 updates.append(f"reflect_response = ${param_idx}")
-                params.append(json.dumps(reflect_response))
+                params.append(json.dumps(reflect_response, ensure_ascii=False))
                 param_idx += 1
 
             if source_query is not None:
@@ -7484,7 +7486,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             if trigger is not None:
                 updates.append(f"trigger = ${param_idx}")
-                params.append(json.dumps(trigger))
+                params.append(json.dumps(trigger, ensure_ascii=False))
                 param_idx += 1
 
             if last_refreshed_source_query is not None:
@@ -8129,7 +8131,7 @@ class MemoryEngine(MemoryEngineInterface):
                         ORDER BY (result_metadata->>'sub_batch_index')::int
                         """,
                         bank_id,
-                        json.dumps({"parent_operation_id": operation_id}),
+                        json.dumps({"parent_operation_id": operation_id}, ensure_ascii=False),
                     )
 
                     # Build child operations list and check if parent status needs updating
@@ -8430,9 +8432,9 @@ class MemoryEngine(MemoryEngineInterface):
                 operation_id,
                 bank_id,
                 operation_type,
-                json.dumps(result_metadata or {}, default=_json_default),
+                json.dumps(result_metadata or {}, default=_json_default, ensure_ascii=False),
                 "pending",
-                json.dumps(full_payload, default=_json_default),
+                json.dumps(full_payload, default=_json_default, ensure_ascii=False),
             )
 
         # For SyncTaskBackend: executes the task immediately.
@@ -8550,7 +8552,7 @@ class MemoryEngine(MemoryEngineInterface):
                 parent_operation_id,
                 bank_id,
                 "batch_retain",
-                json.dumps(parent_metadata.to_dict()),
+                json.dumps(parent_metadata.to_dict(), ensure_ascii=False),
                 "pending",  # Will be updated by status aggregation
             )
 

@@ -1009,7 +1009,7 @@ async def _execute_update_action(
         """,
         new_text,
         embedding_str,
-        json.dumps([history_entry]),
+        json.dumps([history_entry], ensure_ascii=False),
         source_ids,
         len(source_ids),
         uuid.UUID(observation_id),

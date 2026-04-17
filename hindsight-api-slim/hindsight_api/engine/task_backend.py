@@ -187,7 +187,7 @@ class BrokerTaskBackend(TaskBackend):
                 return obj.isoformat()
             raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
-        payload_json = json.dumps(task_dict, default=datetime_encoder)
+        payload_json = json.dumps(task_dict, default=datetime_encoder, ensure_ascii=False)
 
         schema = self._schema_getter() if self._schema_getter else self._schema
         table = fq_table("async_operations", schema)

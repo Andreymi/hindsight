@@ -539,7 +539,7 @@ async def retain_batch(
                     updated_at = now()
                     WHERE operation_id = $2
                     """,
-                    json.dumps([effective_doc_id]),
+                    json.dumps([effective_doc_id], ensure_ascii=False),
                     uuid.UUID(operation_id),
                 )
         except Exception:
@@ -1332,7 +1332,7 @@ async def _streaming_retain_batch(
                         SET result_metadata = result_metadata || $1::jsonb, updated_at = now()
                         WHERE operation_id = $2
                         """,
-                        json.dumps({"facts_committed": True, "unit_ids_count": len(all_unit_ids)}),
+                        json.dumps({"facts_committed": True, "unit_ids_count": len(all_unit_ids)}, ensure_ascii=False),
                         uuid.UUID(operation_id),
                     )
                 log_buffer.append(f"[streaming] Checkpoint: {len(all_unit_ids)} facts committed, ANN pass next")

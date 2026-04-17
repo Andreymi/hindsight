@@ -81,15 +81,15 @@ async def insert_facts_batch(
         mentioned_ats.append(fact.mentioned_at)
         contexts.append(_sanitize_text(fact.context))
         fact_types.append(fact.fact_type)
-        metadata_jsons.append(json.dumps(fact.metadata))
+        metadata_jsons.append(json.dumps(fact.metadata, ensure_ascii=False))
         chunk_ids.append(fact.chunk_id)
         # Use per-fact document_id if available, otherwise fallback to batch-level document_id
         document_ids.append(fact.document_id if fact.document_id else document_id)
         # Convert tags to JSON string for proper batch insertion (PostgreSQL unnest doesn't handle 2D arrays well)
-        tags_list.append(json.dumps(fact.tags if fact.tags else []))
+        tags_list.append(json.dumps(fact.tags if fact.tags else [], ensure_ascii=False))
         # observation_scopes: stored as JSONB (string or 2D array), None if not provided
         observation_scopes_list.append(
-            json.dumps(fact.observation_scopes) if fact.observation_scopes is not None else None
+            json.dumps(fact.observation_scopes, ensure_ascii=False) if fact.observation_scopes is not None else None
         )
         # Build text_signals: entity names + date tokens for enriched BM25 indexing
         signal_parts = []
@@ -216,7 +216,7 @@ async def ensure_bank_exists(conn, bank_id: str) -> None:
         RETURNING bank_id
         """,
         bank_id,
-        json.dumps(DEFAULT_DISPOSITION),
+        json.dumps(DEFAULT_DISPOSITION, ensure_ascii=False),
         "",
         internal_id,
     )
@@ -442,7 +442,7 @@ async def _upsert_document_row(
         bank_id,
         combined_content,
         content_hash,
-        json.dumps(retain_params) if retain_params else None,
+        json.dumps(retain_params, ensure_ascii=False) if retain_params else None,
         document_tags or [],
         preserved_created_at,
     )

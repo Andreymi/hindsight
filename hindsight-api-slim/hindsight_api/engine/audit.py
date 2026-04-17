@@ -55,7 +55,7 @@ def _safe_json(data: Any) -> str | None:
     if data is None:
         return None
     try:
-        return json.dumps(data, default=_json_default)
+        return json.dumps(data, default=_json_default, ensure_ascii=False)
     except Exception:
         logger.debug("Failed to serialize audit data", exc_info=True)
         return None

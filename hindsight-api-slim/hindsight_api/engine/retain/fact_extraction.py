@@ -1684,7 +1684,7 @@ async def extract_facts_from_contents_batch_api(
                 SET result_metadata = result_metadata || $1::jsonb, updated_at = now()
                 WHERE operation_id = $2
                 """,
-                json.dumps(batch_state),
+                json.dumps(batch_state, ensure_ascii=False),
                 operation_id,
             )
             logger.info(f"Stored batch state for operation {operation_id} (crash recovery enabled)")
