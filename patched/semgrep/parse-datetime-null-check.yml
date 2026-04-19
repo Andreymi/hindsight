@@ -14,6 +14,19 @@ rules:
           $X = parse_datetime_flexible($Y)
           if $X is not None:
               ...
+      - pattern-not: |
+          $X = parse_datetime_flexible($Y)
+          ...
+          if $X is None:
+              ...
+          else:
+              ...
+      - pattern-not: |
+          $X = parse_datetime_flexible($Y)
+          if $X is None:
+              ...
+          else:
+              ...
     paths:
       include:
         - hindsight-api-slim/hindsight_api/engine/

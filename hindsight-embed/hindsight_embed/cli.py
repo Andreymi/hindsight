@@ -1038,7 +1038,7 @@ def do_profile_command(args: list[str]) -> int:
                         "daemon_running": profile.daemon_running,
                     }
                 )
-            print(json.dumps(profiles_data, indent=2))
+            print(json.dumps(profiles_data, indent=2, ensure_ascii=False))
             return 0
 
         # Text output
@@ -1325,7 +1325,7 @@ def do_profile_command(args: list[str]) -> int:
                 "config": str(paths.config),
                 "port": paths.port,
             }
-            print(json.dumps(data, indent=2))
+            print(json.dumps(data, indent=2, ensure_ascii=False))
             return 0
 
         # Text output

@@ -903,7 +903,7 @@ class MemoryEngine(MemoryEngineInterface):
             "bank_id": bank_id,
             **retain_task_payload,
         }
-        payload_json = json.dumps(full_retain_payload, default=_json_default)
+        payload_json = json.dumps(full_retain_payload, default=_json_default, ensure_ascii=False)
 
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
@@ -7496,7 +7496,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             if structured_content is not None:
                 updates.append(f"structured_content = ${param_idx}")
-                params.append(json.dumps(structured_content))
+                params.append(json.dumps(structured_content, ensure_ascii=False))
                 param_idx += 1
 
             if not updates:
