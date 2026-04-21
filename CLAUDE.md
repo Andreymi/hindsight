@@ -203,6 +203,7 @@ semgrep --config patched/semgrep/ --no-git-ignore --autofix
 | `ensure-ascii.yml` | `json.dumps()` without `ensure_ascii=False` in engine/ | Non-ASCII (Russian, Chinese) gets escaped to `\uXXXX` in DB/logs/LLM prompts |
 | `parse-datetime-null-check.yml` | `parse_datetime_flexible()` result used without None check | Returns None for "unset"/invalid input → AttributeError (v0.4.15 bug) |
 | `no-os-fork.yml` | `os.fork()` outside daemon.py | Breaks MPS/Metal GPU on macOS — use `subprocess.Popen` instead |
+| `gradient-spinner-tty-guard.yml` | `GradientSpinner` struct missing `interactive: bool` field in `hindsight-cli/src/ui.rs` | Without non-TTY guard, `\r`-based frame redraws leak into captured stdout (Claude Code tool harness, pipes) as literal repeated "Recalling memories…" lines |
 
 ### Local Tool Installation (editable from this repo)
 

@@ -1,0 +1,26 @@
+rules:
+  - id: gradient-spinner-must-guard-non-tty
+    patterns:
+      - pattern: |
+          pub struct GradientSpinner {
+              ...
+          }
+      - pattern-not-regex: "interactive:\\s*bool"
+    paths:
+      include:
+        - "**/hindsight-cli/src/ui.rs"
+    message: >
+      GradientSpinner must carry an `interactive: bool` flag and short-circuit
+      its animation thread when stdout is not a TTY. Without the guard,
+      \r-based frame redraws leak into captured stdout (pipes, Claude Code
+      tool harness, subprocess capture) as literal repeated "Recalling
+      memories..." lines that flood the consumer's buffer. See
+      GradientSpinner::new in hindsight-cli/src/ui.rs — `interactive` is
+      set from `io::stdout().is_terminal()` and gates both the spawn and
+      the finish() clear-sequence.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: correctness
+      technology:
+        - rust
