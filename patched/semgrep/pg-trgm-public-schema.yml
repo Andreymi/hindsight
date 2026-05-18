@@ -1,0 +1,23 @@
+rules:
+  - id: pg-trgm-must-be-in-public-schema
+    pattern-regex: 'CREATE EXTENSION (IF NOT EXISTS )?pg_trgm(?! WITH SCHEMA)'
+    paths:
+      include:
+        - hindsight-api-slim/hindsight_api/alembic/versions/
+    message: >
+      CREATE EXTENSION pg_trgm должен быть с явным WITH SCHEMA public. Без
+      него extension создаётся в первой writable schema из search_path,
+      что для tenant migrations (SupTenantExtension с search_path =
+      "<tenant_schema>", public) приводит к установке в tenant schema.
+      Worker pool connections используют default postgres search_path
+      ('"$user", public, extensions') — оператор % невиден, batch_retain
+      падает с "operator does not exist: text % text". Patched 2026-05-16
+      в c1a2b3d4e5f6 + corrective migration 9c8f3a2d1b4e_move_pg_trgm_to_public.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: correctness
+      technology:
+        - python
+        - postgresql
+        - hindsight

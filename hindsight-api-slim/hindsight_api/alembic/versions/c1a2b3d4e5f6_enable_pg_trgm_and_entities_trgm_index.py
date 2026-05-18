@@ -32,9 +32,16 @@ def upgrade() -> None:
     # available or may require manual enablement.  We gracefully skip the index
     # creation if the extension cannot be loaded — the entity resolver will
     # auto-detect and fall back to the "full" lookup strategy at runtime.  See #626.
+    # Always pin pg_trgm to `public` so the `%` operator (and similarity functions)
+    # are visible from any session's default search_path. In multi-tenant deployments
+    # (SupTenantExtension), this migration runs with search_path TO "<tenant>", public,
+    # so without an explicit WITH SCHEMA pg_trgm would land in the tenant schema and
+    # be invisible to background workers that use the default postgres search_path.
+    # See: PATCHED — `pg-trgm-public-schema` semgrep rule and migration
+    # `move_pg_trgm_to_public` for the corrective migration that fixes existing installs.
     conn = op.get_bind()
     try:
-        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"))
     except Exception:
         # Extension not available (managed Postgres, insufficient privileges, etc.)
         # Roll back the failed statement and skip index creation.
