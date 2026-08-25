@@ -111,6 +111,36 @@ def _cleanup_leaked_span_recorders():
             recorders.remove(recorder)
 
 
+@pytest.fixture(autouse=True)
+def _restore_metrics_collector():
+    """Undo an app startup's swap of the process-global metrics collector.
+
+    ``metrics._metrics_collector`` defaults to ``NoOpMetricsCollector``, and the
+    API lifespan replaces it with the real one (``create_metrics_collector()`` in
+    api/http.py) for the rest of the process — nothing restores it. Under xdist
+    that means every test scheduled after any app-starting test in the same worker
+    runs against the real collector.
+
+    That matters because the no-op swallows its arguments while the real collector
+    compares them: a test mocking an LLM response leaves
+    ``response.usage...cached_tokens`` a ``MagicMock``, and ``record_llm_call``'s
+    ``if cached_input_tokens > 0`` then raises ``TypeError: '>' not supported
+    between instances of 'MagicMock' and 'int'``. The victims move between runs
+    with the xdist schedule, which is what makes it read as random flakiness
+    (v0.9.2: 36 such failures in one run, a partly different set in the next).
+
+    ``test_metrics.py::test_returns_noop_by_default`` already saves and restores
+    this global by hand; this generalises that guard to every test, the same way
+    ``_cleanup_leaked_span_recorders`` above guards the recorder registry.
+    """
+    from hindsight_api import metrics
+
+    before = metrics._metrics_collector
+    yield
+    if metrics._metrics_collector is not before:
+        metrics._metrics_collector = before
+
+
 # Default pg0 instance configuration for tests
 DEFAULT_PG0_INSTANCE_NAME = "hindsight-test"
 DEFAULT_PG0_PORT = int(os.environ.get("HINDSIGHT_TEST_PG_PORT", "5556"))
